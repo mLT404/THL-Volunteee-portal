@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<meta name="theme-color" content="#C8102E"/>
+<title>THL Volunteer Portal</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.23.2/babel.min.js" crossorigin></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#1A1C21;font-family:Inter,system-ui,sans-serif}
+#thl-loading{position:fixed;inset:0;background:#1A1C21;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:20px}
+.thl-cross{width:56px;height:56px;background:#C8102E;position:relative;animation:thlpulse 1.4s ease-in-out infinite;border-radius:4px}
+.thl-cross::before{content:"";position:absolute;width:58%;height:22%;background:#fff;top:39%;left:21%}
+.thl-cross::after{content:"";position:absolute;width:22%;height:58%;background:#fff;top:21%;left:39%}
+@keyframes thlpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(0.92);opacity:0.7}}
+.thl-loading-text{color:#6b7280;font-size:12px;letter-spacing:0.1em;text-transform:uppercase;font-family:monospace}
+.thl-loading-sub{color:#4b5563;font-size:11px;letter-spacing:0.06em;font-family:monospace;margin-top:-8px}
+</style>
+</head>
+<body>
+<div id="thl-loading">
+  <div class="thl-cross"></div>
+  <div class="thl-loading-text">Tallinding Home Link</div>
+  <div class="thl-loading-sub">Loading volunteer portal...</div>
+</div>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+const { Users, CalendarDays, LogOut, Plus, X, Search, MapPin, Clock, Phone, Mail,
+  Pencil, Trash2, AlertTriangle, CheckCircle2, LayoutGrid, Bell, Download, Award,
+  Eye, EyeOff, BarChart2, Home, Menu, Lock, UserCheck, ClipboardCheck,
+  ChevronLeft, ChevronRight, Send, Copy, Check, Minus, FileText,
+  UserPlus, Calendar, IdCard, MessageSquare, HeartPulse } = LucideReact;
+
+// ─── BRAND ────────────────────────────────────────────────────
+const ORG = { name:"Tallinding Home Link", short:"THL", tag:"Red Cross · Volunteer Chapter" };
+const FONTS = `
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  ::-webkit-scrollbar{width:5px;height:5px}
+  ::-webkit-scrollbar-track{background:#f0ede6}
+  ::-webkit-scrollbar-thumb{background:#c8102e;border-radius:3px}
+`;
+const C = {
+  red:"#C8102E",rD:"#9C0C24",rDim:"#F9E4E6",
+  ink:"#1B1D22",paper:"#F5F2EB",pDim:"#EDEAE0",
+  white:"#fff",slate:"#5B6570",dim:"#8A929A",border:"#D9D3C4",bar:"#1A1C21",
+  amber:"#D48B22",aDim:"#FBF0DC",green:"#2A7A50",gDim:"#E1EFE8",
+  blue:"#1A6FAB",bDim:"#E0EEF7",gray:"#E8E5DC",
+};
+
+// ─── CONSTANTS ────────────────────────────────────────────────
+const SKILLS=["First Aid","CPR","CPR/AED Instructor","Blood Drive Support","Shelter Ops","Disaster Logistics","Driving / CDL","Translation","Warehousing","IT Support","Fundraising","Public Speaking","Nursing (RN/LPN)","Mental Health First Aid","Food Service","Community Outreach"];
+const CATS=["Disaster Response","Blood Drive","Training","Shelter Support","Community Outreach","Fundraising"];
+const CERTS=["CPR/AED","First Aid L1","First Aid L2","CDL Class A","CDL Class B","RN License","Mental Health First Aid","CERT","Disaster Shelter Mgmt","Other"];
+const CHAPTERS=["Tallinding Chapter","Kanifing Chapter","Banjul Chapter","West Coast Chapter"];
+const ROLES={super_admin:"Super Admin",chapter_manager:"Chapter Manager",coordinator:"Coordinator",staff:"Staff",volunteer:"Volunteer"};
+const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const AVAIL={available:{bg:C.gDim,fg:C.green},unavailable:{bg:C.rDim,fg:C.red},maybe:{bg:C.aDim,fg:C.amber}};
+const SMS_TMPLS={
+  event_reminder:`Hi {name}, reminder: you're signed up for *{event}* on {date} at {location}. Please arrive 15 mins early. Reply CONFIRM to confirm. — ${ORG.short}`,
+  new_event:`Hi {name}! New volunteer opportunity: *{event}* on {date} at {location}. Log in to the ${ORG.short} portal to sign up. — ${ORG.short}`,
+  cert_expiry:`Hi {name}, your *{cert}* certification is expiring soon. Please arrange renewal. Contact your coordinator. — ${ORG.short}`,
+  general:`Hi {name}, message from ${ORG.name}: [your message here]. — ${ORG.short}`,
+};
+const EMAIL_TMPLS={
+  new_event:{label:"New Event",subj:`New ${ORG.short} Opportunity: {event}`,body:`Dear {name},\n\nA new event has been scheduled:\n\nEvent: {event}\nDate: {date}\nLocation: {location}\n\nLog in to the portal to sign up.\n\nThank you,\n${ORG.name} Team`},
+  shift_reminder:{label:"Shift Reminder",subj:`Reminder: ${ORG.short} Shift — {event}`,body:`Dear {name},\n\nReminder: you are scheduled for:\n\nEvent: {event}\nDate: {date}\nLocation: {location}\n\nArrive 15 minutes early.\n\nThank you,\n${ORG.name} Team`},
+  cert_warning:{label:"Cert Expiry",subj:`Action Required: Certification Expiring — ${ORG.short}`,body:`Dear {name},\n\nOne or more certifications are expiring soon. Please arrange renewal to remain eligible for field deployment.\n\nContact your coordinator for assistance.\n\nThank you,\n${ORG.name} Team`},
+  bg_warning:{label:"BG Check Renewal",subj:`Background Check Renewal — ${ORG.short}`,body:`Dear {name},\n\nYour background check has expired or is due for renewal. Please contact your chapter administrator.\n\nThank you,\n${ORG.name} Team`},
+  general:{label:"General Message",subj:`${ORG.name} — Notice`,body:`Dear Volunteer,\n\n[Your message here]\n\nThank you,\n${ORG.name} Team`},
+};
+
+// ─── UTILS ────────────────────────────────────────────────────
+const uid=()=>Math.random().toString(36).slice(2,10);
+const hashPw=pw=>btoa(unescape(encodeURIComponent(pw+"::thl_v3")));
+const checkPw=(pw,h)=>hashPw(pw)===h;
+const fmt=d=>!d?"—":new Date(d+"T12:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+const fmtS=d=>!d?"—":new Date(d+"T12:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
+const expired=d=>!!d&&new Date(d+"T23:59:59")<Date.now();
+const expiring=d=>{if(!d)return false;const ms=new Date(d+"T23:59:59")-Date.now();return ms>0&&ms<60*864e5;};
+const hrsCalc=(s,e)=>{if(!s||!e)return 0;const[sh,sm]=s.split(":").map(Number),[eh,em]=e.split(":").map(Number);let m=(eh*60+em)-(sh*60+sm);if(m<=0)m+=1440;return +(m/60).toFixed(1);};
+const toDay=()=>new Date().toISOString().slice(0,10);
+const cycleAv=s=>!s?"available":s==="available"?"unavailable":s==="unavailable"?"maybe":null;
+
+function useIsMobile(){
+  const[m,setM]=useState(()=>window.innerWidth<768);
+  useEffect(()=>{const h=()=>setM(window.innerWidth<768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  return m;
+}
+
+const exportCSV=(rows,file)=>{
+  if(!rows.length)return;
+  const k=Object.keys(rows[0]);
+  const csv=[k.join(","),...rows.map(r=>k.map(x=>`"${String(r[x]??"").replace(/"/g,'""')}"`).join(","))].join("\n");
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  a.download=file;a.click();
+};
+const printW=html=>{const w=window.open("","_blank","width=1100,height=750");w.document.write(html);w.document.close();};
+const rosterPrint=vols=>printW(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${ORG.name} Roster</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11px;padding:20px;color:#1B1D22}.hdr{display:flex;align-items:center;gap:12px;margin-bottom:8px}.cross{width:44px;height:44px;background:#C8102E;position:relative;display:flex;align-items:center;justify-content:center}.cross::before{content:"";position:absolute;width:60%;height:20%;background:#fff}.cross::after{content:"";position:absolute;width:20%;height:60%;background:#fff}h1{font-size:20px;font-weight:800;text-transform:uppercase;color:#C8102E}.sub{font-size:10px;color:#5B6570}.meta{font-size:10px;color:#5B6570;margin:6px 0 14px}table{width:100%;border-collapse:collapse}thead{background:#1B1D22;color:#fff}th{padding:7px 8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.06em}td{padding:6px 8px;border-bottom:1px solid #DCD5C6;font-size:10px}tr:nth-child(even)td{background:#F6F3EC}.a{color:#2A7A50;font-weight:700}.s{color:#D48B22;font-weight:700}.i{color:#5B6570}footer{margin-top:14px;font-size:9px;color:#5B6570;border-top:1px solid #DCD5C6;padding-top:6px}</style></head><body><div class="hdr"><div class="cross"></div><div><h1>${ORG.name}</h1><div class="sub">${ORG.tag} · Volunteer Roster — CONFIDENTIAL</div></div></div><div class="meta">Generated: ${new Date().toLocaleString()} · ${vols.length} volunteers</div><table><thead><tr><th>#</th><th>Name</th><th>Chapter</th><th>Phone</th><th>Email</th><th>Emergency</th><th>Status</th><th>BG</th><th>Hrs</th></tr></thead><tbody>${vols.map((v,i)=>`<tr><td>${i+1}</td><td><strong>${v.name}</strong></td><td>${v.chapter}</td><td>${v.phone||"—"}</td><td>${v.email}</td><td>${v.emergencyContact||"—"}</td><td class="${v.status[0]}">${v.status}</td><td>${v.backgroundCheck?.status||"—"}</td><td>${v.totalHours||0}</td></tr>`).join("")}</tbody></table><footer>${ORG.name} · Confidential</footer><script>window.onload=()=>setTimeout(()=>window.print(),400)</script></body></html>`);
+const sheetPrint=(ev,vols)=>printW(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sign-In: ${ev.title}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11px;padding:20px;color:#1B1D22}.hdr{display:flex;align-items:center;gap:12px;margin-bottom:6px}.cross{width:44px;height:44px;background:#C8102E;position:relative;display:flex;align-items:center;justify-content:center}.cross::before{content:"";position:absolute;width:60%;height:20%;background:#fff}.cross::after{content:"";position:absolute;width:20%;height:60%;background:#fff}h1{font-size:20px;font-weight:800;text-transform:uppercase;color:#C8102E}.sub{font-size:10px;color:#5B6570}.meta{font-size:11px;color:#1B1D22;margin:8px 0 14px;line-height:1.9}table{width:100%;border-collapse:collapse}thead{background:#1B1D22;color:#fff}th{padding:8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.06em}td{padding:8px;border-bottom:1px solid #DCD5C6;height:32px}tr:nth-child(even)td{background:#F6F3EC}footer{margin-top:18px;font-size:9px;color:#5B6570;border-top:1px solid #DCD5C6;padding-top:6px}</style></head><body><div class="hdr"><div class="cross"></div><div><h1>${ORG.name}</h1><div class="sub">Volunteer Sign-In Sheet</div></div></div><div class="meta"><strong>${ev.title}</strong><br>Date: ${fmt(ev.date)} | Time: ${ev.startTime}–${ev.endTime} (${hrsCalc(ev.startTime,ev.endTime)}h) | Location: ${ev.location}<br>Slots: ${ev.slotsNeeded} | Registered: ${vols.length}</div><table><thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Emergency Contact</th><th style="width:100px">Time In</th><th style="width:100px">Time Out</th><th style="width:150px">Signature</th></tr></thead><tbody>${vols.map((v,i)=>`<tr><td>${i+1}</td><td><strong>${v.name}</strong></td><td>${v.phone||"—"}</td><td>${v.emergencyContact||"—"}</td><td></td><td></td><td></td></tr>`).join("")}</tbody></table><footer>${ORG.name} · ${ev.title} Sign-In Sheet</footer><script>window.onload=()=>setTimeout(()=>window.print(),400)</script></body></html>`);
+
+const idCardPrint=v=>printW(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ID: ${v.name}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f0f0f0}.card{width:340px;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.2)}.card-top{background:#C8102E;padding:20px 18px 14px;display:flex;align-items:flex-start;gap:14px}.avatar{width:64px;height:64px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:#C8102E;flex-shrink:0}.name{color:#fff;font-size:22px;font-weight:800;text-transform:uppercase;letter-spacing:.02em;line-height:1.1;margin-bottom:4px}.role{color:rgba(255,255,255,0.75);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.card-body{background:#fff;padding:16px 18px}.row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:#1B1D22}.lbl{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#5B6570;margin-bottom:2px}.skills{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}.skill{background:#F5F2EB;padding:3px 7px;font-size:9.5px;color:#1B1D22;border-radius:2px}.card-foot{background:#1B1D22;padding:10px 18px;display:flex;justify-content:space-between;align-items:center}.id{font-size:10px;color:#6b7280;font-family:monospace}.org{font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em}@media print{body{background:#fff}.card{box-shadow:none;border:1px solid #ddd}}</style></head><body><div class="card"><div class="card-top"><div class="avatar">${v.name[0]}</div><div><div class="name">${v.name}</div><div class="role">${v.chapter}</div></div></div><div class="card-body"><div class="lbl">Contact</div><div class="row">${v.phone||"—"} &nbsp;·&nbsp; ${v.email}</div>${v.emergencyContact?`<div class="lbl" style="margin-top:6px">Emergency</div><div class="row">${v.emergencyContact}</div>`:""}<div class="lbl" style="margin-top:8px">Skills</div><div class="skills">${(v.skills||[]).map(s=>`<span class="skill">${s}</span>`).join("")}</div><div style="margin-top:10px;display:flex;gap:10px"><div><div class="lbl">Status</div><div style="font-size:12px;font-weight:700;color:${v.status==="active"?"#2A7A50":v.status==="standby"?"#D48B22":"#5B6570"}">${v.status.toUpperCase()}</div></div><div><div class="lbl">Joined</div><div style="font-size:12px">${fmt(v.joined)}</div></div><div><div class="lbl">Hours</div><div style="font-size:12px;font-weight:700">${v.totalHours||0}h</div></div></div></div><div class="card-foot"><span class="id">THL-${v.id.toUpperCase()}</span><span class="org">${ORG.short}</span></div></div><script>window.onload=()=>setTimeout(()=>window.print(),400)</script></body></html>`);
+
+// ─── SEED DATA ────────────────────────────────────────────────
+const AP=hashPw("Admin@123"),VP=hashPw("Vol@123");
+const SU=[
+  {id:"u1",name:"Jordan Lee",email:"admin@thl.org",passwordHash:AP,role:"super_admin",chapter:"Tallinding Chapter"},
+  {id:"u2",name:"Marisol Ibarra",email:"marisol@thl.org",passwordHash:VP,role:"volunteer",chapter:"Tallinding Chapter",volunteerId:"v1"},
+  {id:"u3",name:"Devon Wallace",email:"devon@thl.org",passwordHash:VP,role:"volunteer",chapter:"Kanifing Chapter",volunteerId:"v2"},
+  {id:"u4",name:"Sam Rivera",email:"sam@thl.org",passwordHash:AP,role:"chapter_manager",chapter:"Kanifing Chapter"},
+  {id:"u5",name:"Chris Adama",email:"chris@thl.org",passwordHash:AP,role:"coordinator",chapter:"Tallinding Chapter"},
+];
+const SV=[
+  {id:"v1",userId:"u2",name:"Marisol Ibarra",email:"marisol@thl.org",phone:"220-770-0142",chapter:"Tallinding Chapter",skills:["First Aid","CPR","Shelter Ops"],status:"active",joined:"2023-03-11",emergencyContact:"Fatou Ibarra · 220-770-9900",backgroundCheck:{status:"cleared",date:"2023-03-15",expiry:"2025-03-15"},certs:[{id:"c1",name:"CPR/AED",issued:"2024-01-10",expiry:"2026-01-10"},{id:"c2",name:"First Aid L2",issued:"2024-01-10",expiry:"2026-01-10"}],notes:"Bilingual EN/Wolof. Excellent shelter coordinator.",totalHours:48},
+  {id:"v2",userId:"u3",name:"Devon Wallace",email:"devon@thl.org",phone:"220-770-0198",chapter:"Kanifing Chapter",skills:["Driving / CDL","Disaster Logistics","Warehousing"],status:"active",joined:"2022-11-02",emergencyContact:"Anna Wallace · 220-770-8811",backgroundCheck:{status:"expired",date:"2022-11-10",expiry:"2024-11-10"},certs:[{id:"c3",name:"CDL Class B",issued:"2022-11-15",expiry:"2028-11-15"}],notes:"",totalHours:112},
+  {id:"v3",userId:null,name:"Priya Natarajan",email:"priya@thl.org",phone:"220-770-0177",chapter:"Banjul Chapter",skills:["Nursing (RN/LPN)","Blood Drive Support"],status:"standby",joined:"2024-01-20",emergencyContact:"Raj Natarajan · 220-770-7722",backgroundCheck:{status:"cleared",date:"2024-01-25",expiry:"2026-12-25"},certs:[{id:"c4",name:"RN License",issued:"2020-06-01",expiry:"2026-08-01"}],notes:"Weekends only.",totalHours:22},
+  {id:"v4",userId:null,name:"Tomás Reyes",email:"tomas@thl.org",phone:"220-770-0163",chapter:"Tallinding Chapter",skills:["Translation","Public Speaking","Community Outreach"],status:"active",joined:"2021-07-15",emergencyContact:"",backgroundCheck:{status:"pending",date:null,expiry:null},certs:[],notes:"Speaks Wolof, French, English.",totalHours:67},
+  {id:"v5",userId:null,name:"Aliyah Brooks",email:"aliyah@thl.org",phone:"220-770-0121",chapter:"West Coast Chapter",skills:["IT Support","Warehousing","Fundraising"],status:"inactive",joined:"2020-09-30",emergencyContact:"",backgroundCheck:{status:"expired",date:"2020-10-01",expiry:"2022-10-01"},certs:[],notes:"",totalHours:0},
+];
+const SE=[
+  {id:"e1",title:"Tallinding Blood Drive",category:"Blood Drive",date:"2026-08-04",startTime:"08:00",endTime:"14:00",location:"Tallinding Community Centre",slotsNeeded:6,description:"Registration desk, donor escort, and refreshment station coverage.",volunteerIds:["v1","v4"],attendance:{},status:"upcoming"},
+  {id:"e2",title:"Flood Relief Shelter",category:"Disaster Response",date:"2026-08-01",startTime:"18:00",endTime:"08:00",location:"Kanifing Secondary School",slotsNeeded:10,description:"Overnight shelter staffing for displaced residents.",volunteerIds:["v1","v2","v3"],attendance:{},status:"upcoming"},
+  {id:"e3",title:"CPR Certification Refresher",category:"Training",date:"2026-08-09",startTime:"09:00",endTime:"13:00",location:"THL HQ — Training Room",slotsNeeded:15,description:"Mandatory recert for active field volunteers.",volunteerIds:["v1","v2"],attendance:{},status:"upcoming"},
+  {id:"e4",title:"Community First Aid Workshop",category:"Community Outreach",date:"2026-07-15",startTime:"10:00",endTime:"14:00",location:"Banjul Public Library",slotsNeeded:4,description:"Public first aid awareness event.",volunteerIds:["v2","v3"],attendance:{"v2":"present","v3":"absent"},status:"completed"},
+];
+
+// ─── STORAGE ──────────────────────────────────────────────────
+function useStore(key,seed){
+  const[data,setData]=useState(null);const[rdy,setRdy]=useState(false);
+  const sto={get:async(k)=>{if(window.storage){const r=await window.storage.get(k,true);return r?JSON.parse(r.value):null;}return JSON.parse(localStorage.getItem(k)||"null");},set:async(k,v)=>{if(window.storage){await window.storage.set(k,JSON.stringify(v),true);}else{localStorage.setItem(k,JSON.stringify(v));}}};
+  useEffect(()=>{(async()=>{try{const r=await sto.get(key);setData(r!==null?r:seed);if(r===null)await sto.set(key,seed);}catch{setData(seed);}setRdy(true);})();},[]);
+  const save=async v=>{setData(v);try{await sto.set(key,v);}catch{}};
+  return[data,save,rdy];
+}
+
+// ─── UI ATOMS ─────────────────────────────────────────────────
+const inp={width:"100%",padding:"10px 12px",border:`1px solid ${C.border}`,background:C.white,fontFamily:"Inter,sans-serif",fontSize:14,color:C.ink,outline:"none",boxSizing:"border-box",WebkitAppearance:"none",borderRadius:0};
+
+function Btn({children,onClick,danger,secondary,disabled,full,sm,style:s={}}){
+  return(
+    <button onClick={onClick} disabled={disabled} style={{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,padding:sm?"8px 14px":"10px 18px",border:secondary?`1px solid ${C.border}`:"none",cursor:disabled?"not-allowed":"pointer",fontFamily:"'IBM Plex Mono',monospace",fontSize:sm?11:12.5,fontWeight:600,letterSpacing:"0.04em",textTransform:"uppercase",background:disabled?C.gray:danger?C.red:secondary?C.white:C.ink,color:disabled?C.slate:danger||!secondary?C.white:C.ink,opacity:disabled?.65:1,width:full?"100%":"auto",minHeight:40,flexShrink:0,...s}}>
+      {children}
+    </button>
+  );
+}
+
+function Modal({title,onClose,children,wide,footer}){
+  const mob=useIsMobile();
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(27,29,34,0.65)",zIndex:100,display:"flex",alignItems:mob?"flex-end":"center",justifyContent:"center",padding:mob?0:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.paper,width:"100%",maxWidth:mob?"100%":wide?700:460,maxHeight:mob?"92vh":"90vh",overflowY:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.36)",borderRadius:mob?"16px 16px 0 0":0}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px",borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,background:C.paper,zIndex:1}}>
+          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,textTransform:"uppercase",letterSpacing:"0.03em",color:C.ink}}>{title}</span>
+          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",color:C.slate,padding:6,borderRadius:"50%",minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}><X size={20}/></button>
+        </div>
+        <div style={{padding:20}}>{children}</div>
+        {footer&&<div style={{padding:"12px 20px",borderTop:`1px solid ${C.border}`,background:C.pDim,display:"flex",gap:8,flexWrap:"wrap",paddingBottom:mob?24:12}}>{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+const Fld=({label,children,half})=>(
+  <div style={{marginBottom:14,gridColumn:half?"span 1":"span 2"}}>
+    <div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10.5,fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase",color:C.slate,marginBottom:5}}>{label}</div>
+    {children}
+  </div>
+);
+const Lbl=({children})=><div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10.5,fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase",color:C.slate,marginBottom:6}}>{children}</div>;
+const IR=({icon:I,label})=><div style={{display:"flex",alignItems:"center",gap:9,fontSize:13,color:C.ink,marginBottom:8}}><I size={14} color={C.slate}/><span>{label||"—"}</span></div>;
+
+function Alrt({type,children}){
+  const m={warn:{bg:C.aDim,b:C.amber,I:AlertTriangle,fg:C.amber},error:{bg:C.rDim,b:C.red,I:AlertTriangle,fg:C.red},success:{bg:C.gDim,b:C.green,I:CheckCircle2,fg:C.green},info:{bg:C.bDim,b:C.blue,I:HeartPulse,fg:C.blue}};
+  const{bg,b,I,fg}=m[type]||m.warn;
+  return<div style={{display:"flex",alignItems:"flex-start",gap:10,background:bg,border:`1px solid ${b}`,padding:"11px 14px",marginBottom:14,borderRadius:4}}><I size={15} color={fg} style={{marginTop:1,flexShrink:0}}/><div style={{fontSize:13,color:C.ink,lineHeight:1.5}}>{children}</div></div>;
+}
+
+const Tag=({s,type="status"})=>{
+  const sm={active:{bg:C.gDim,fg:C.green},standby:{bg:C.aDim,fg:C.amber},inactive:{bg:C.gray,fg:C.slate}};
+  const bm={cleared:{bg:C.gDim,fg:C.green},pending:{bg:C.aDim,fg:C.amber},expired:{bg:C.rDim,fg:C.red},waived:{bg:C.gray,fg:C.slate}};
+  const x=(type==="bg"?bm:sm)[s]||{bg:C.gray,fg:C.slate};
+  return<span style={{background:x.bg,color:x.fg,fontFamily:"'IBM Plex Mono',monospace",fontSize:10.5,fontWeight:600,letterSpacing:"0.06em",padding:"3px 9px",textTransform:"uppercase",whiteSpace:"nowrap",borderRadius:2}}>{s}</span>;
+};
+
+const TagTog=({opts,sel,onTog})=>(
+  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+    {opts.map(o=>{const a=sel.includes(o);return<button key={o} type="button" onClick={()=>onTog(o)} style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:11,fontWeight:500,padding:"5px 10px",cursor:"pointer",border:`1px solid ${a?C.red:C.border}`,background:a?C.rDim:C.white,color:a?C.rD:C.slate,minHeight:34,borderRadius:2}}>{o}</button>;})}
+  </div>
+);
+
+const SecTitle=({eyebrow,title,action})=>(
+  <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:10}}>
+    <div>{eyebrow&&<div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:11,color:C.red,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:3}}>{eyebrow}</div>}<h2 style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:28,textTransform:"uppercase",letterSpacing:"0.01em",color:C.ink,margin:0}}>{title}</h2></div>
+    {action}
+  </div>
+);
+
+function ThlLogo({size=32}){
+  const t=size*0.22,arm=size*0.6;
+  return<div style={{width:size,height:size,background:C.red,position:"relative",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,borderRadius:size*0.06}}><div style={{position:"absolute",width:arm,height:t,background:C.white}}/><div style={{position:"absolute",width:t,height:arm,background:C.white}}/></div>;
+}
+
+// ─── AUTH ─────────────────────────────────────────────────────
+function Auth({users,pending,onLogin,onReg}){
+  const mob=useIsMobile();
+  const[mode,setMode]=useState("login");
+  const[email,setEmail]=useState("");const[pw,setPw]=useState("");const[show,setShow]=useState(false);
+  const[rN,setRN]=useState("");const[rE,setRE]=useState("");const[rP,setRP]=useState("");const[rP2,setRP2]=useState("");const[rCh,setRCh]=useState(CHAPTERS[0]);
+  const[err,setErr]=useState("");const[ok,setOk]=useState(false);
+
+  const login=()=>{
+    const u=(users||[]).find(x=>x.email.toLowerCase()===email.trim().toLowerCase());
+    if(!u||!checkPw(pw,u.passwordHash)){setErr("Invalid email or password.");return;}
+    setErr("");onLogin(u);
+  };
+  const reg=()=>{
+    if(!rN.trim()||!rE.trim()||!rP){setErr("All fields required.");return;}
+    if(rP!==rP2){setErr("Passwords do not match.");return;}
+    if(rP.length<6){setErr("Password min 6 characters.");return;}
+    if([...(users||[]),...(pending||[])].find(u=>u.email.toLowerCase()===rE.trim().toLowerCase())){setErr("Email already registered.");return;}
+    setErr("");setOk(true);
+    onReg({id:uid(),name:rN.trim(),email:rE.trim().toLowerCase(),passwordHash:hashPw(rP),chapter:rCh,requestedAt:toDay()});
+  };
+
+  return(
+    <div style={{minHeight:"100vh",background:C.bar,display:"flex",alignItems:"center",justifyContent:"center",padding:mob?16:20}}>
+      <style>{FONTS}</style>
+      <div style={{width:"100%",maxWidth:440}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <ThlLogo size={56}/>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:26,color:C.white,letterSpacing:"0.03em",textTransform:"uppercase",marginTop:12}}>{ORG.name}</div>
+          <div style={{color:"#8b8f97",fontSize:12.5,marginTop:4,fontFamily:"Inter,sans-serif"}}>{ORG.tag} · Volunteer Portal</div>
+        </div>
+        <div style={{background:C.paper,padding:mob?20:24,marginBottom:12,borderRadius:8,boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+          <div style={{display:"flex",border:`1px solid ${C.border}`,marginBottom:20,borderRadius:4,overflow:"hidden"}}>
+            {["login","register"].map(m=><button key={m} onClick={()=>{setMode(m);setErr("");setOk(false);}} style={{flex:1,padding:"10px 0",cursor:"pointer",border:"none",background:mode===m?C.ink:C.white,color:mode===m?C.white:C.ink,fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",minHeight:42}}>{m==="login"?"Sign In":"Register"}</button>)}
+          </div>
+          {ok?<Alrt type="success"><strong>Application submitted!</strong> Pending admin approval. You'll be notified once approved.</Alrt>:
+          <>{err&&<Alrt type="error">{err}</Alrt>}
+          {mode==="login"?(
+            <>
+              <Fld label="Email"><input style={inp} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@thl.org" onKeyDown={e=>e.key==="Enter"&&login()}/></Fld>
+              <Fld label="Password"><div style={{position:"relative"}}><input style={{...inp,paddingRight:42}} type={show?"text":"password"} value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&login()}/><button onClick={()=>setShow(!show)} style={{position:"absolute",right:12,top:10,background:"none",border:"none",cursor:"pointer",color:C.slate,minWidth:24,minHeight:24}}>{show?<EyeOff size={16}/>:<Eye size={16}/>}</button></div></Fld>
+              <Btn onClick={login} full>Sign In →</Btn>
+            </>
+          ):(
+            <>
+              <Fld label="Full Name"><input style={inp} value={rN} onChange={e=>setRN(e.target.value)} placeholder="First Last"/></Fld>
+              <Fld label="Email"><input style={inp} type="email" value={rE} onChange={e=>setRE(e.target.value)} placeholder="you@example.org"/></Fld>
+              <Fld label="Chapter"><select style={inp} value={rCh} onChange={e=>setRCh(e.target.value)}>{CHAPTERS.map(c=><option key={c}>{c}</option>)}</select></Fld>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
+                <Fld label="Password" half><input style={inp} type="password" value={rP} onChange={e=>setRP(e.target.value)} placeholder="Min 6"/></Fld>
+                <Fld label="Confirm" half><input style={inp} type="password" value={rP2} onChange={e=>setRP2(e.target.value)} placeholder="Repeat"/></Fld>
+              </div>
+              <Btn onClick={reg} full>Submit Application</Btn>
+            </>
+          )}</>}
+        </div>
+        <div style={{background:"rgba(255,255,255,0.05)",padding:"12px 16px",border:"1px solid rgba(255,255,255,0.1)",borderRadius:6}}>
+          <div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:7}}>Demo Accounts (tap to fill)</div>
+          {[["admin@thl.org","Admin@123","Super Admin"],["marisol@thl.org","Vol@123","Volunteer"],["sam@thl.org","Admin@123","Chapter Mgr"]].map(([e,p,r])=>(
+            <div key={e} onClick={()=>{setEmail(e);setPw(p);setMode("login");}} style={{cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+              <span style={{fontSize:12,color:"#9ca3af"}}>{e}</span>
+              <span style={{fontSize:10,color:C.red,fontFamily:"'IBM Plex Mono',monospace"}}>{r}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SHELL ────────────────────────────────────────────────────
+const ANAV=[{k:"dashboard",l:"Dashboard",I:LayoutGrid},{k:"volunteers",l:"Volunteers",I:Users},{k:"events",l:"Events",I:CalendarDays},{k:"availability",l:"Availability",I:Calendar},{k:"notifications",l:"Notify",I:Send},{k:"reports",l:"Reports",I:BarChart2},{k:"approvals",l:"Approvals",I:UserPlus}];
+const VNAV=[{k:"home",l:"Home",I:Home},{k:"events",l:"Events",I:CalendarDays},{k:"availability",l:"Availability",I:Calendar},{k:"profile",l:"Profile",I:UserCheck}];
+
+function Shell({sess,users,pending,vols,evs,avail,notifs,onLogout,pUsers,pPending,pVols,pEvs,pAvail,pNotifs}){
+  const mob=useIsMobile();
+  const isA=["super_admin","chapter_manager","coordinator","staff"].includes(sess.role);
+  const canMgr=["super_admin","chapter_manager"].includes(sess.role);
+  const allNav=isA?ANAV:VNAV;
+  const visNav=isA?allNav.filter(n=>n.k!=="approvals"):allNav;
+  const[view,setView]=useState(isA?"dashboard":"home");
+  const[bar,setBar]=useState(!mob);
+  const[uMenu,setUMenu]=useState(false);
+  const[bellOpen,setBellOpen]=useState(false);
+  const[cpw,setCpw]=useState(false);
+
+  useEffect(()=>setBar(!mob),[mob]);
+
+  const alerts=useMemo(()=>{
+    if(!isA)return[];
+    const a=[];
+    (vols||[]).forEach(v=>{
+      if(expired(v.backgroundCheck?.expiry))a.push({t:"bg",text:`${v.name} — BG check expired`});
+      else if(expiring(v.backgroundCheck?.expiry))a.push({t:"bg",text:`${v.name} — BG check expiring soon`});
+      (v.certs||[]).forEach(c=>{
+        if(expired(c.expiry))a.push({t:"cert",text:`${v.name} — ${c.name} expired`});
+        else if(expiring(c.expiry))a.push({t:"cert",text:`${v.name} — ${c.name} expiring soon`});
+      });
+    });
+    (evs||[]).filter(e=>e.status==="upcoming"&&e.volunteerIds.length<e.slotsNeeded).forEach(e=>a.push({t:"slot",text:`${e.title} — ${e.slotsNeeded-e.volunteerIds.length} open slots`}));
+    return a;
+  },[vols,evs,isA]);
+
+  const close=()=>{setUMenu(false);setBellOpen(false);};
+  const navLabel=[...ANAV,...VNAV].find(n=>n.k===view)?.l||"Portal";
+  const props={sess,users:users||[],pending:pending||[],vols:vols||[],evs:evs||[],avail:avail||{},notifs:notifs||[],pUsers,pPending,pVols,pEvs,pAvail,pNotifs,setView,alerts};
+
+  return(
+    <div style={{display:"flex",minHeight:"100vh",background:C.paper,fontFamily:"Inter,sans-serif"}}>
+      <style>{FONTS}</style>
+
+      {/* SIDEBAR — desktop only */}
+      {!mob&&(
+        <div style={{width:bar?230:0,minWidth:bar?230:0,background:C.bar,display:"flex",flexDirection:"column",transition:"width 0.2s",overflow:"hidden",flexShrink:0,position:"sticky",top:0,height:"100vh"}}>
+          <div style={{padding:16,borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",gap:10,minHeight:64}}>
+            <ThlLogo size={32}/><div style={{minWidth:0}}><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:C.white,textTransform:"uppercase",letterSpacing:"0.03em",whiteSpace:"nowrap"}}>{ORG.name}</div><div style={{fontSize:9.5,color:"#6b7280",fontFamily:"'IBM Plex Mono',monospace",textTransform:"uppercase",letterSpacing:"0.05em",marginTop:1}}>{ORG.tag}</div></div>
+          </div>
+          <nav style={{flex:1,padding:"10px 0",overflowY:"auto"}}>
+            {visNav.map(({k,l,I})=>{const a=view===k;return(
+              <button key={k} onClick={()=>setView(k)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 16px",border:"none",background:a?"rgba(200,16,46,0.18)":"transparent",cursor:"pointer",textAlign:"left",borderLeft:a?`3px solid ${C.red}`:"3px solid transparent",minHeight:44}}>
+                <I size={16} color={a?C.red:"#6b7280"}/><span style={{fontFamily:"Inter,sans-serif",fontSize:13.5,fontWeight:a?600:400,color:a?C.white:"#9ca3af",whiteSpace:"nowrap"}}>{l}</span>
+              </button>
+            );})}
+            {canMgr&&<button onClick={()=>setView("approvals")} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 16px",border:"none",background:view==="approvals"?"rgba(200,16,46,0.18)":"transparent",cursor:"pointer",textAlign:"left",borderLeft:view==="approvals"?`3px solid ${C.red}`:"3px solid transparent",minHeight:44}}>
+              <UserPlus size={16} color={view==="approvals"?C.red:"#6b7280"}/><span style={{fontFamily:"Inter,sans-serif",fontSize:13.5,fontWeight:view==="approvals"?600:400,color:view==="approvals"?C.white:"#9ca3af",whiteSpace:"nowrap"}}>Approvals</span>
+              {(pending||[]).length>0&&<span style={{marginLeft:"auto",minWidth:20,height:20,background:C.red,borderRadius:10,fontSize:10,color:C.white,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,paddingInline:4}}>{Math.min((pending||[]).length,9)}</span>}
+            </button>}
+          </nav>
+          <div style={{padding:"12px 16px",borderTop:"1px solid rgba(255,255,255,0.08)"}}>
+            <div style={{fontSize:12,fontWeight:600,color:C.white,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{sess.name}</div>
+            <div style={{fontSize:10,color:"#6b7280",fontFamily:"'IBM Plex Mono',monospace",textTransform:"uppercase",letterSpacing:"0.05em",marginTop:1}}>{ROLES[sess.role]}</div>
+          </div>
+        </div>
+      )}
+
+      {/* MAIN */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
+        {/* HEADER */}
+        <header style={{background:C.white,borderBottom:`1px solid ${C.border}`,padding:"0 16px",height:56,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:20,boxShadow:"0 1px 0 rgba(0,0,0,0.06)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            {!mob&&<button onClick={()=>setBar(!bar)} style={{background:"none",border:"none",cursor:"pointer",color:C.slate,padding:6,minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}><Menu size={18}/></button>}
+            {mob&&<ThlLogo size={26}/>}
+            <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:mob?17:20,textTransform:"uppercase",letterSpacing:"0.02em",color:C.ink}}>{mob?ORG.short:navLabel}</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <div style={{position:"relative"}}>
+              <button onClick={()=>{setBellOpen(!bellOpen);setUMenu(false);}} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:"6px 8px",color:C.slate,display:"flex",position:"relative",borderRadius:4,minWidth:38,minHeight:38,alignItems:"center",justifyContent:"center"}}>
+                <Bell size={16}/>{alerts.length>0&&<span style={{position:"absolute",top:-5,right:-5,width:17,height:17,background:C.red,borderRadius:"50%",fontSize:9,color:C.white,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{Math.min(alerts.length,9)}</span>}
+              </button>
+              {bellOpen&&<div style={{position:"absolute",right:0,top:44,width:mob?"90vw":320,maxWidth:320,background:C.white,border:`1px solid ${C.border}`,boxShadow:"0 8px 24px rgba(0,0,0,0.14)",zIndex:50,borderRadius:6}}>
+                <div style={{padding:"9px 14px",borderBottom:`1px solid ${C.border}`,fontFamily:"'IBM Plex Mono',monospace",fontSize:10.5,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",color:C.slate}}>Alerts ({alerts.length})</div>
+                <div style={{maxHeight:260,overflowY:"auto"}}>
+                  {alerts.length===0?<div style={{padding:14,fontSize:13,color:C.slate}}>No active alerts.</div>:alerts.map((a,i)=><div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"9px 14px",borderBottom:`1px solid ${C.border}`}}><AlertTriangle size={12} color={a.t==="slot"?C.amber:C.red} style={{marginTop:2,flexShrink:0}}/><span style={{fontSize:12.5,color:C.ink,lineHeight:1.4}}>{a.text}</span></div>)}
+                </div>
+              </div>}
+            </div>
+            <div style={{position:"relative"}}>
+              <button onClick={()=>{setUMenu(!uMenu);setBellOpen(false);}} style={{display:"flex",alignItems:"center",gap:8,background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:"6px 10px",borderRadius:4,minHeight:38}}>
+                <div style={{width:26,height:26,background:C.red,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:14,borderRadius:"50%"}}>{sess.name[0]}</div>
+                {!mob&&<span style={{fontSize:13,fontWeight:600,color:C.ink}}>{sess.name.split(" ")[0]}</span>}
+              </button>
+              {uMenu&&<div style={{position:"absolute",right:0,top:44,width:200,background:C.white,border:`1px solid ${C.border}`,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:50,borderRadius:6}}>
+                <div style={{padding:"8px 14px",borderBottom:`1px solid ${C.border}`}}><div style={{fontSize:13,fontWeight:600,color:C.ink}}>{sess.name}</div><div style={{fontSize:11,color:C.slate,fontFamily:"'IBM Plex Mono',monospace",textTransform:"uppercase",letterSpacing:"0.04em"}}>{ROLES[sess.role]}</div></div>
+                <button onClick={()=>{setCpw(true);setUMenu(false);}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"11px 14px",border:"none",background:"none",cursor:"pointer",fontSize:13,color:C.ink,minHeight:44}}><Lock size={14} color={C.slate}/>Change Password</button>
+                <div style={{borderTop:`1px solid ${C.border}`}}/>
+                <button onClick={onLogout} style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"11px 14px",border:"none",background:"none",cursor:"pointer",fontSize:13,color:C.red,minHeight:44}}><LogOut size={14}/>Sign Out</button>
+              </div>}
+            </div>
+          </div>
+        </header>
+
+        <main onClick={close} style={{flex:1,padding:mob?"16px 14px 88px":"28px 24px 60px",maxWidth:1140,width:"100%",margin:"0 auto",boxSizing:"border-box"}}>
+          {view==="dashboard"&&isA&&<Dashboard {...props}/>}
+          {view==="volunteers"&&isA&&<Roster {...props}/>}
+          {view==="events"&&<Events {...props}/>}
+          {view==="availability"&&<AvailView {...props} isA={isA}/>}
+          {view==="notifications"&&isA&&<Notifications {...props}/>}
+          {view==="reports"&&isA&&<Reports {...props}/>}
+          {view==="approvals"&&canMgr&&<Approvals {...props}/>}
+          {view==="home"&&!isA&&<VolHome {...props}/>}
+          {view==="profile"&&!isA&&<Profile {...props}/>}
+        </main>
+
+        {/* BOTTOM NAV — mobile only */}
+        {mob&&<nav style={{position:"fixed",bottom:0,left:0,right:0,background:C.white,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:20,boxShadow:"0 -2px 12px rgba(0,0,0,0.08)"}}>
+          {(isA?[{k:"dashboard",I:LayoutGrid},{k:"volunteers",I:Users},{k:"events",I:CalendarDays},{k:"reports",I:BarChart2},{k:"approvals",I:UserPlus}]:[{k:"home",I:Home},{k:"events",I:CalendarDays},{k:"availability",I:Calendar},{k:"profile",I:UserCheck}]).map(({k,I})=>{
+            const a=view===k;
+            return(
+              <button key={k} onClick={()=>setView(k)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"8px 4px",border:"none",background:"none",cursor:"pointer",minHeight:56,color:a?C.red:C.slate,position:"relative"}}>
+                <I size={20} color={a?C.red:C.slate}/>
+                <span style={{fontSize:9,fontFamily:"'IBM Plex Mono',monospace",textTransform:"uppercase",letterSpacing:"0.04em",fontWeight:600,color:a?C.red:C.dim}}>{k==="dashboard"?"Dash":k==="volunteers"?"Staff":k==="notifications"?"Notify":k.slice(0,5)}</span>
+                {k==="approvals"&&(pending||[]).length>0&&<span style={{position:"absolute",top:6,right:"25%",width:16,height:16,background:C.red,borderRadius:"50%",fontSize:9,color:C.white,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{Math.min((pending||[]).length,9)}</span>}
+              </button>
+            );
+          })}
+        </nav>}
+      </div>
+      {cpw&&<CpwModal sess={sess} users={users||[]} pUsers={pUsers} onClose={()=>setCpw(false)}/>}
+    </div>
+  );
+}
+
+function CpwModal({sess,users,pUsers,onClose}){
+  const[cur,setCur]=useState("");const[nw,setNw]=useState("");const[nw2,setNw2]=useState("");const[err,setErr]=useState("");const[ok,setOk]=useState(false);
+  const save=()=>{
+    const u=(users||[]).find(x=>x.id===sess.id);
+    if(!checkPw(cur,u.passwordHash)){setErr("Current password incorrect.");return;}
+    if(nw.length<6){setErr("Min 6 characters.");return;}
+    if(nw!==nw2){setErr("Passwords do not match.");return;}
+    pUsers((users||[]).map(x=>x.id===sess.id?{...x,passwordHash:hashPw(nw)}:x));setOk(true);
+  };
+  return(<Modal title="Change Password" onClose={onClose} footer={!ok&&<><Btn onClick={save}>Save</Btn><Btn secondary onClick={onClose}>Cancel</Btn></>}>
+    {ok?<Alrt type="success">Password changed successfully.</Alrt>:<>{err&&<Alrt type="error">{err}</Alrt>}<Fld label="Current Password"><input style={inp} type="password" value={cur} onChange={e=>setCur(e.target.value)}/></Fld><Fld label="New Password"><input style={inp} type="password" value={nw} onChange={e=>setNw(e.target.value)} placeholder="Min 6 characters"/></Fld><Fld label="Confirm"><input style={inp} type="password" value={nw2} onChange={e=>setNw2(e.target.value)}/></Fld></>}
+  </Modal>);
+}
+
+// ─── DASHBOARD ────────────────────────────────────────────────
+function SC({l,v,I,acc,sub}){return(<div style={{background:C.white,border:`1px solid ${C.border}`,padding:18,flex:"1 1 140px",minWidth:120,borderRadius:6,boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10,color:C.slate,textTransform:"uppercase",letterSpacing:"0.06em"}}>{l}</span><I size={14} color={acc||C.slate}/></div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:38,color:C.ink,lineHeight:1,marginTop:6}}>{v}</div>{sub&&<div style={{fontSize:11,color:C.slate,marginTop:3}}>{sub}</div>}</div>);}
+
+function Dashboard({vols,evs,alerts,pending,setView}){
+  const active=(vols||[]).filter(v=>v.status==="active").length;
+  const up=(evs||[]).filter(e=>e.status==="upcoming");
+  const slots=up.reduce((s,e)=>s+Math.max(e.slotsNeeded-e.volunteerIds.length,0),0);
+  const totH=(vols||[]).reduce((s,v)=>s+(v.totalHours||0),0);
+  const crit=alerts.filter(a=>a.t!=="slot");
+  const mob=useIsMobile();
+  return(<div>
+    <SecTitle eyebrow={ORG.short+" · Chapter Overview"} title="Dashboard"/>
+    {(pending||[]).length>0&&<Alrt type="info"><strong>{pending.length} application{pending.length>1?"s":""} pending.</strong> <button onClick={()=>setView("approvals")} style={{background:"none",border:"none",cursor:"pointer",color:C.blue,fontWeight:600,textDecoration:"underline",padding:0,fontSize:13}}>Review →</button></Alrt>}
+    {crit.length>0&&<Alrt type="warn"><strong>{crit.length} compliance alert{crit.length>1?"s":""}:</strong> {crit.slice(0,2).map(a=>a.text).join("; ")}{crit.length>2?` +${crit.length-2} more`:""}</Alrt>}
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:24}}>
+      <SC l="Volunteers" v={(vols||[]).length} I={Users}/>
+      <SC l="Active" v={active} I={CheckCircle2} acc={C.green}/>
+      <SC l="Events" v={up.length} I={CalendarDays} acc={C.red}/>
+      <SC l="Open Slots" v={slots} I={AlertTriangle} acc={C.amber}/>
+      <SC l="Total Hours" v={totH} I={Clock} sub="all time"/>
+      <SC l="Pending" v={(pending||[]).length} I={UserPlus} acc={C.blue}/>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:16}}>
+      <div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <h3 style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,textTransform:"uppercase",color:C.ink,margin:0}}>Upcoming Events</h3>
+          <button onClick={()=>setView("events")} style={{background:"none",border:"none",cursor:"pointer",color:C.red,fontFamily:"'IBM Plex Mono',monospace",fontSize:11,fontWeight:600,textTransform:"uppercase",display:"flex",alignItems:"center",gap:3}}>All<ChevronRight size={12}/></button>
+        </div>
+        <div style={{border:`1px solid ${C.border}`,background:C.white,borderRadius:6,overflow:"hidden"}}>
+          {[...up].sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5).map((e,i)=><div key={e.id} style={{padding:"11px 14px",borderBottom:i<4?`1px solid ${C.border}`:"none",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><div><div style={{fontSize:13.5,fontWeight:600,color:C.ink}}>{e.title}</div><div style={{fontSize:11.5,color:C.slate,marginTop:2}}>{fmt(e.date)} · {e.location}</div></div><div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:12,color:e.volunteerIds.length>=e.slotsNeeded?C.green:C.red,whiteSpace:"nowrap"}}>{e.volunteerIds.length}/{e.slotsNeeded}</div></div>)}
+          {up.length===0&&<div style={{padding:14,fontSize:13,color:C.slate}}>No upcoming events.</div>}
+        </div>
+      </div>
+      <div>
+        <h3 style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,textTransform:"uppercase",color:C.ink,margin:"0 0 10px"}}>Compliance Alerts</h3>
+        <div style={{border:`1px solid ${C.border}`,background:C.white,borderRadius:6,overflow:"hidden"}}>
+          {crit.slice(0,6).map((a,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderBottom:i<5?`1px solid ${C.border}`:"none"}}><AlertTriangle size={12} color={C.red} style={{flexShrink:0}}/><span style={{fontSize:12.5,color:C.ink}}>{a.text}</span></div>)}
+          {crit.length===0&&<div style={{padding:14,fontSize:13,color:C.green,display:"flex",alignItems:"center",gap:6}}><CheckCircle2 size={14}/>All certs and BG checks current.</div>}
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
+// ─── ROSTER ───────────────────────────────────────────────────
+function Roster({vols,evs,sess,pVols}){
+  const mob=useIsMobile();
+  const canEdit=["super_admin","chapter_manager"].includes(sess.role);
+  const[q,setQ]=useState("");const[stF,setStF]=useState("all");const[chF,setChF]=useState("all");
+  const[editing,setEditing]=useState(null);const[detail,setDetail]=useState(null);const[del,setDel]=useState(null);
+
+  const fil=useMemo(()=>(vols||[]).filter(v=>{
+    const mq=!q.trim()||v.name.toLowerCase().includes(q.toLowerCase())||v.email.toLowerCase().includes(q.toLowerCase())||(v.skills||[]).some(s=>s.toLowerCase().includes(q.toLowerCase()));
+    return mq&&(stF==="all"||v.status===stF)&&(chF==="all"||v.chapter===chF);
+  }),[vols,q,stF,chF]);
+
+  const save=d=>{
+    if(d.id)pVols((vols||[]).map(v=>v.id===d.id?d:v));
+    else pVols([...(vols||[]),{...d,id:uid(),totalHours:0,certs:[],backgroundCheck:{status:"pending",date:null,expiry:null},emergencyContact:""}]);
+    setEditing(null);
+  };
+
+  return(<div>
+    <SecTitle eyebrow={`${(vols||[]).length} volunteers`} title="Volunteer Roster" action={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><Btn secondary sm onClick={()=>rosterPrint(fil)}><FileText size={12}/>Print</Btn>{canEdit&&<Btn sm onClick={()=>setEditing("new")}><Plus size={12}/>Add</Btn>}</div>}/>
+    <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+      <div style={{position:"relative",flex:1,minWidth:180}}><Search size={14} style={{position:"absolute",left:11,top:12,color:C.slate}}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Name, email or skill…" style={{...inp,paddingLeft:34}}/></div>
+      <select value={stF} onChange={e=>setStF(e.target.value)} style={{...inp,width:mob?"100%":140}}><option value="all">All Statuses</option>{["active","standby","inactive"].map(s=><option key={s}>{s}</option>)}</select>
+      {!mob&&<select value={chF} onChange={e=>setChF(e.target.value)} style={{...inp,width:170}}><option value="all">All Chapters</option>{CHAPTERS.map(c=><option key={c}>{c}</option>)}</select>}
+    </div>
+
+    {mob?(
+      /* Mobile card list */
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {fil.map(v=>(
+          <div key={v.id} onClick={()=>setDetail(v)} style={{background:C.white,border:`1px solid ${C.border}`,borderLeft:`4px solid ${v.status==="active"?C.green:v.status==="standby"?C.amber:C.slate}`,padding:14,borderRadius:6,boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div><div style={{fontWeight:700,fontSize:15,color:C.ink}}>{v.name}</div><div style={{fontSize:12,color:C.slate,marginTop:2}}>{v.chapter}</div></div>
+              <Tag s={v.status}/>
+            </div>
+            <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+              {(v.skills||[]).slice(0,3).map(s=><span key={s} style={{fontSize:10,background:C.pDim,padding:"2px 7px",color:C.slate,fontFamily:"'IBM Plex Mono',monospace",borderRadius:2}}>{s}</span>)}
+              {(v.skills||[]).length>3&&<span style={{fontSize:10.5,color:C.dim}}>+{v.skills.length-3}</span>}
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:8,alignItems:"center"}}>
+              <span style={{fontSize:12,color:C.slate}}><Award size={11} style={{verticalAlign:-1}}/> {v.totalHours||0}h logged</span>
+              <Tag s={v.backgroundCheck?.status||"pending"} type="bg"/>
+            </div>
+          </div>
+        ))}
+        {fil.length===0&&<div style={{padding:24,textAlign:"center",color:C.slate,fontSize:13,border:`1px dashed ${C.border}`,borderRadius:6}}>No volunteers match.</div>}
+      </div>
+    ):(
+      /* Desktop table */
+      <div style={{border:`1px solid ${C.border}`,background:C.white,borderRadius:6,overflow:"hidden",overflowX:"auto"}}>
+        <div style={{display:"grid",gridTemplateColumns:"36px 1.4fr 1fr 1.4fr .9fr .9fr 68px",padding:"8px 14px",background:C.ink,color:C.white,fontFamily:"'IBM Plex Mono',monospace",fontSize:10,letterSpacing:"0.06em",textTransform:"uppercase",minWidth:680}}>
+          <span>#</span><span>Name</span><span>Chapter</span><span>Skills</span><span>Status</span><span>BG</span><span></span>
+        </div>
+        {fil.map((v,i)=>(
+          <div key={v.id} onClick={()=>setDetail(v)} style={{display:"grid",gridTemplateColumns:"36px 1.4fr 1fr 1.4fr .9fr .9fr 68px",padding:"11px 14px",borderTop:`1px solid ${C.border}`,alignItems:"center",minWidth:680,cursor:"pointer",transition:"background 0.1s"}} onMouseOver={e=>e.currentTarget.style.background="#fafaf8"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+            <span style={{fontFamily:"'IBM Plex Mono',monospace",color:C.dim,fontSize:10.5}}>{String(i+1).padStart(3,"0")}</span>
+            <div><div style={{fontWeight:600,fontSize:13.5,color:C.ink}}>{v.name}</div><div style={{fontSize:11,color:C.slate}}>{v.email}</div></div>
+            <div style={{fontSize:12,color:C.slate}}>{v.chapter}</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:3}}>{(v.skills||[]).slice(0,2).map(s=><span key={s} style={{fontSize:10,background:C.pDim,padding:"2px 5px",color:C.slate,fontFamily:"'IBM Plex Mono',monospace",borderRadius:2}}>{s}</span>)}{(v.skills||[]).length>2&&<span style={{fontSize:10.5,color:C.dim}}>+{v.skills.length-2}</span>}</div>
+            <Tag s={v.status}/><Tag s={v.backgroundCheck?.status||"pending"} type="bg"/>
+            <div onClick={e=>e.stopPropagation()} style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
+              {canEdit&&<><button onClick={()=>setEditing(v)} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:7,color:C.slate,borderRadius:4,minWidth:30,minHeight:30,display:"flex",alignItems:"center",justifyContent:"center"}}><Pencil size={12}/></button><button onClick={()=>setDel(v)} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:7,color:C.slate,borderRadius:4,minWidth:30,minHeight:30,display:"flex",alignItems:"center",justifyContent:"center"}}><Trash2 size={12}/></button></>}
+            </div>
+          </div>
+        ))}
+        {fil.length===0&&<div style={{padding:24,textAlign:"center",color:C.slate,fontSize:13}}>No volunteers match your search.</div>}
+      </div>
+    )}
+
+    {detail&&<VolDetail v={(vols||[]).find(x=>x.id===detail.id)||detail} evs={evs||[]} canEdit={canEdit} onEdit={x=>{setDetail(null);setEditing(x);}} onDel={()=>setDel((vols||[]).find(x=>x.id===detail.id)||detail)} onClose={()=>setDetail(null)} pVols={pVols} all={vols||[]}/>}
+    {editing&&<VolForm init={editing==="new"?null:editing} onCancel={()=>setEditing(null)} onSave={save}/>}
+    {del&&<Modal title="Remove Volunteer" onClose={()=>setDel(null)} footer={<><Btn danger onClick={()=>{pVols((vols||[]).filter(v=>v.id!==del.id));setDel(null);setDetail(null);}}>Remove</Btn><Btn secondary onClick={()=>setDel(null)}>Cancel</Btn></>}><p style={{fontSize:14,color:C.ink,lineHeight:1.6}}>Remove <strong>{del.name}</strong> permanently?</p></Modal>}
+  </div>);
+}
+
+function VolDetail({v,evs,canEdit,onEdit,onDel,onClose,pVols,all}){
+  const myEvs=(evs||[]).filter(e=>e.volunteerIds.includes(v.id));
+  const[newC,setNewC]=useState(null);const[bgE,setBgE]=useState(false);const[bgF,setBgF]=useState({...v.backgroundCheck});
+  const addC=c=>pVols(all.map(x=>x.id===v.id?{...x,certs:[...(x.certs||[]),{...c,id:uid()}]}:x));
+  const remC=id=>pVols(all.map(x=>x.id===v.id?{...x,certs:(x.certs||[]).filter(c=>c.id!==id)}:x));
+  const saveBg=()=>{pVols(all.map(x=>x.id===v.id?{...x,backgroundCheck:bgF}:x));setBgE(false);};
+  return(
+    <Modal title={v.name} onClose={onClose} wide footer={canEdit?<><Btn sm onClick={()=>onEdit(v)}><Pencil size={13}/>Edit</Btn><Btn sm onClick={()=>idCardPrint(v)}><IdCard size={13}/>ID Card</Btn><Btn danger sm onClick={onDel}><Trash2 size={13}/>Remove</Btn></>:null}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+        <div><IR icon={Mail} label={v.email}/><IR icon={Phone} label={v.phone}/><IR icon={MapPin} label={v.chapter}/><IR icon={Clock} label={`Joined ${fmt(v.joined)}`}/><IR icon={Award} label={`${v.totalHours||0} hrs logged`}/>{v.emergencyContact&&<IR icon={HeartPulse} label={v.emergencyContact}/>}<div style={{marginTop:8}}><Tag s={v.status}/></div></div>
+        <div><Lbl>Skills</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:12}}>{(v.skills||[]).map(s=><span key={s} style={{fontSize:11,background:C.pDim,padding:"3px 7px",color:C.ink,fontFamily:"'IBM Plex Mono',monospace",borderRadius:2}}>{s}</span>)}</div>{v.notes&&<><Lbl>Notes</Lbl><p style={{fontSize:12.5,color:C.slate,lineHeight:1.5,margin:0}}>{v.notes}</p></>}</div>
+      </div>
+      <div style={{marginTop:16,borderTop:`1px solid ${C.border}`,paddingTop:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><Lbl>Background Check</Lbl>{canEdit&&<button onClick={()=>setBgE(!bgE)} style={{background:"none",border:"none",cursor:"pointer",color:C.red,fontSize:11,fontFamily:"'IBM Plex Mono',monospace",textTransform:"uppercase"}}>{bgE?"Cancel":"Edit"}</button>}</div>
+        {bgE?(<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          <Fld label="Status" half><select style={inp} value={bgF.status||"pending"} onChange={e=>setBgF({...bgF,status:e.target.value})}>{["pending","cleared","expired","waived"].map(s=><option key={s}>{s}</option>)}</select></Fld>
+          <Fld label="Date" half><input type="date" style={inp} value={bgF.date||""} onChange={e=>setBgF({...bgF,date:e.target.value})}/></Fld>
+          <Fld label="Expiry" half><input type="date" style={inp} value={bgF.expiry||""} onChange={e=>setBgF({...bgF,expiry:e.target.value})}/></Fld>
+          <div style={{gridColumn:"span 3"}}><Btn sm onClick={saveBg}><Check size={12}/>Save</Btn></div>
+        </div>):(<div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"center"}}><Tag s={v.backgroundCheck?.status||"pending"} type="bg"/>{v.backgroundCheck?.expiry&&<span style={{fontSize:12,color:expired(v.backgroundCheck.expiry)?C.red:expiring(v.backgroundCheck.expiry)?C.amber:C.slate}}>Expires {fmt(v.backgroundCheck.expiry)}{expired(v.backgroundCheck.expiry)&&" ⚠"}</span>}</div>)}
+      </div>
+      <div style={{marginTop:14,borderTop:`1px solid ${C.border}`,paddingTop:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><Lbl>Certifications ({(v.certs||[]).length})</Lbl>{canEdit&&!newC&&<button onClick={()=>setNewC({name:CERTS[0],issued:"",expiry:""})} style={{background:"none",border:"none",cursor:"pointer",color:C.red,fontSize:11,fontFamily:"'IBM Plex Mono',monospace",textTransform:"uppercase"}}><Plus size={11} style={{verticalAlign:-2}}/>Add</button>}</div>
+        {newC&&<div style={{background:C.pDim,padding:12,marginBottom:8,borderRadius:4}}><div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr 1fr auto",gap:8,alignItems:"flex-end"}}>
+          <Fld label="Cert" half><select style={inp} value={newC.name} onChange={e=>setNewC({...newC,name:e.target.value})}>{CERTS.map(c=><option key={c}>{c}</option>)}</select></Fld>
+          <Fld label="Issued" half><input type="date" style={inp} value={newC.issued} onChange={e=>setNewC({...newC,issued:e.target.value})}/></Fld>
+          <Fld label="Expiry" half><input type="date" style={inp} value={newC.expiry} onChange={e=>setNewC({...newC,expiry:e.target.value})}/></Fld>
+          <div style={{paddingBottom:14,display:"flex",gap:4}}><button onClick={()=>{if(newC.name&&newC.issued){addC(newC);setNewC(null);}}} style={{background:C.green,border:"none",padding:"10px 12px",cursor:"pointer",color:C.white,borderRadius:4,minWidth:40,minHeight:40,display:"flex",alignItems:"center",justifyContent:"center"}}><Check size={14}/></button><button onClick={()=>setNewC(null)} style={{background:C.gray,border:"none",padding:"10px 12px",cursor:"pointer",color:C.slate,borderRadius:4,minWidth:40,minHeight:40,display:"flex",alignItems:"center",justifyContent:"center"}}><X size={14}/></button></div>
+        </div></div>}
+        {(v.certs||[]).length===0&&!newC&&<p style={{fontSize:13,color:C.slate,fontStyle:"italic",margin:0}}>No certifications on file.</p>}
+        {(v.certs||[]).map(c=><div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
+          <div><span style={{fontSize:13.5,fontWeight:600,color:C.ink}}>{c.name}</span><span style={{fontSize:11.5,color:C.slate,marginLeft:10}}>Issued {fmt(c.issued)}</span></div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:12,color:expired(c.expiry)?C.red:expiring(c.expiry)?C.amber:C.slate}}>Exp {fmt(c.expiry)}{(expired(c.expiry)||expiring(c.expiry))&&" ⚠"}</span>{canEdit&&<button onClick={()=>remC(c.id)} style={{background:"none",border:"none",cursor:"pointer",color:C.slate,padding:4,minWidth:28,minHeight:28,display:"flex",alignItems:"center",justifyContent:"center"}}><Trash2 size={12}/></button>}</div>
+        </div>)}
+      </div>
+      <div style={{marginTop:14,borderTop:`1px solid ${C.border}`,paddingTop:14}}>
+        <Lbl>Event History ({myEvs.length})</Lbl>
+        {myEvs.slice(0,5).map(e=><div key={e.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.border}`,fontSize:13}}><span style={{color:C.ink}}>{e.title}</span><span style={{color:C.slate,display:"flex",alignItems:"center",gap:6}}>{fmtS(e.date)}{e.attendance?.[v.id]==="present"&&<CheckCircle2 size={12} color={C.green}/>}{e.attendance?.[v.id]==="absent"&&<X size={12} color={C.red}/>}</span></div>)}
+        {myEvs.length===0&&<p style={{fontSize:13,color:C.slate,fontStyle:"italic",margin:0}}>No event history.</p>}
+      </div>
+    </Modal>
+  );
+}
+
+function VolForm({init,onCancel,onSave}){
+  const[f,setF]=useState(init||{name:"",email:"",phone:"",chapter:CHAPTERS[0],skills:[],status:"active",joined:toDay(),emergencyContact:"",backgroundCheck:{status:"pending",date:"",expiry:""},notes:""});
+  const tog=s=>setF(p=>({...p,skills:p.skills.includes(s)?p.skills.filter(x=>x!==s):[...p.skills,s]}));
+  return(
+    <Modal title={init?"Edit Volunteer":"Add Volunteer"} onClose={onCancel} wide footer={<><Btn disabled={!f.name.trim()||!f.email.trim()} onClick={()=>onSave(f)}>Save Record</Btn><Btn secondary onClick={onCancel}>Cancel</Btn></>}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+        <Fld label="Full Name" half><input style={inp} value={f.name} onChange={e=>setF({...f,name:e.target.value})}/></Fld>
+        <Fld label="Chapter" half><select style={inp} value={f.chapter} onChange={e=>setF({...f,chapter:e.target.value})}>{CHAPTERS.map(c=><option key={c}>{c}</option>)}</select></Fld>
+        <Fld label="Email" half><input style={inp} type="email" value={f.email} onChange={e=>setF({...f,email:e.target.value})}/></Fld>
+        <Fld label="Phone" half><input style={inp} value={f.phone} onChange={e=>setF({...f,phone:e.target.value})}/></Fld>
+        <Fld label="Status" half><select style={inp} value={f.status} onChange={e=>setF({...f,status:e.target.value})}>{["active","standby","inactive"].map(s=><option key={s}>{s}</option>)}</select></Fld>
+        <Fld label="Join Date" half><input type="date" style={inp} value={f.joined} onChange={e=>setF({...f,joined:e.target.value})}/></Fld>
+        <Fld label="Emergency Contact (name · phone)"><input style={inp} value={f.emergencyContact||""} onChange={e=>setF({...f,emergencyContact:e.target.value})} placeholder="e.g. Fatou Ibarra · 220-770-9900"/></Fld>
+        <Fld label="BG Status" half><select style={inp} value={f.backgroundCheck?.status||"pending"} onChange={e=>setF({...f,backgroundCheck:{...f.backgroundCheck,status:e.target.value}})}>{["pending","cleared","expired","waived"].map(s=><option key={s}>{s}</option>)}</select></Fld>
+        <Fld label="BG Expiry" half><input type="date" style={inp} value={f.backgroundCheck?.expiry||""} onChange={e=>setF({...f,backgroundCheck:{...f.backgroundCheck,expiry:e.target.value}})}/></Fld>
+      </div>
+      <Fld label="Skills"><TagTog opts={SKILLS} sel={f.skills||[]} onTog={tog}/></Fld>
+      <Fld label="Notes"><textarea style={{...inp,minHeight:70,resize:"vertical"}} value={f.notes||""} onChange={e=>setF({...f,notes:e.target.value})}/></Fld>
+    </Modal>
+  );
+}
+
+// ─── EVENTS ───────────────────────────────────────────────────
+function Events({sess,vols,evs,pEvs,pVols}){
+  const mob=useIsMobile();
+  const isA=["super_admin","chapter_manager","coordinator","staff"].includes(sess.role);
+  const canMgr=["super_admin","chapter_manager","coordinator"].includes(sess.role);
+  const[editing,setEditing]=useState(null);const[attE,setAttE]=useState(null);const[rosterE,setRosterE]=useState(null);const[delE,setDelE]=useState(null);
+  const[fSt,setFSt]=useState("all");const[fCat,setFCat]=useState("all");
+
+  const fil=useMemo(()=>[...(evs||[])].filter(e=>(fSt==="all"||e.status===fSt)&&(fCat==="all"||e.category===fCat)).sort((a,b)=>a.date.localeCompare(b.date)),[evs,fSt,fCat]);
+
+  const saveEv=d=>{
+    if(d.id)pEvs((evs||[]).map(e=>e.id===d.id?d:e));
+    else pEvs([...(evs||[]),{...d,id:uid(),volunteerIds:[],attendance:{},status:"upcoming"}]);
+    setEditing(null);
+  };
+  const togSign=ev=>{
+    const vid=sess.volunteerId;const has=ev.volunteerIds.includes(vid);
+    pEvs((evs||[]).map(e=>e.id===ev.id?{...e,volunteerIds:has?e.volunteerIds.filter(i=>i!==vid):[...e.volunteerIds,vid]}:e));
+  };
+  const saveAtt=(ev,att)=>{
+    const h=hrsCalc(ev.startTime,ev.endTime);
+    pVols((vols||[]).map(v=>{
+      if(!ev.volunteerIds.includes(v.id))return v;
+      const was=ev.attendance?.[v.id]==="present",now=att[v.id]==="present";
+      const d=now&&!was?h:!now&&was?-h:0;
+      return d?{...v,totalHours:Math.max(0,(v.totalHours||0)+d)}:v;
+    }));
+    pEvs((evs||[]).map(e=>e.id===ev.id?{...e,attendance:att,status:"completed"}:e));
+    setAttE(null);
+  };
+
+  return(<div>
+    <SecTitle eyebrow={`${(evs||[]).length} total`} title="Events & Shifts" action={canMgr&&<Btn sm onClick={()=>setEditing("new")}><Plus size={13}/>New</Btn>}/>
+    <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+      <select value={fSt} onChange={e=>setFSt(e.target.value)} style={{...inp,width:mob?"100%":140}}><option value="all">All Statuses</option>{["upcoming","completed","cancelled"].map(s=><option key={s}>{s}</option>)}</select>
+      {!mob&&<select value={fCat} onChange={e=>setFCat(e.target.value)} style={{...inp,width:170}}><option value="all">All Categories</option>{CATS.map(c=><option key={c}>{c}</option>)}</select>}
+    </div>
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {fil.map(e=>{
+        const filled=e.volunteerIds.length,full=filled>=e.slotsNeeded;
+        const isSigned=sess.role==="volunteer"&&e.volunteerIds.includes(sess.volunteerId);
+        const sVols=(vols||[]).filter(v=>e.volunteerIds.includes(v.id));
+        const h=hrsCalc(e.startTime,e.endTime);
+        return(
+          <div key={e.id} style={{background:C.white,border:`1px solid ${C.border}`,borderLeft:`4px solid ${e.status==="completed"?C.slate:full?C.green:C.red}`,padding:mob?14:18,borderRadius:6,boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+              <div style={{flex:1,minWidth:200}}>
+                <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:4,flexWrap:"wrap"}}>
+                  <span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10,color:C.red,fontWeight:600,letterSpacing:"0.06em",textTransform:"uppercase"}}>{e.category}</span>
+                  <span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10,color:e.status==="completed"?C.slate:e.status==="cancelled"?C.red:C.green,background:e.status==="completed"?C.gray:e.status==="cancelled"?C.rDim:C.gDim,padding:"2px 7px",textTransform:"uppercase",borderRadius:2}}>{e.status}</span>
+                </div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:mob?18:22,color:C.ink}}>{e.title}</div>
+                <div style={{display:"flex",gap:12,marginTop:6,flexWrap:"wrap",color:C.slate,fontSize:12}}>
+                  <span style={{display:"flex",alignItems:"center",gap:4}}><CalendarDays size={11}/>{fmt(e.date)}</span>
+                  <span style={{display:"flex",alignItems:"center",gap:4}}><Clock size={11}/>{e.startTime}–{e.endTime} ({h}h)</span>
+                  <span style={{display:"flex",alignItems:"center",gap:4}}><MapPin size={11}/>{e.location}</span>
+                </div>
+                {!mob&&<p style={{fontSize:13,color:C.ink,marginTop:8,lineHeight:1.5,maxWidth:500,marginBottom:0}}>{e.description}</p>}
+              </div>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:8,minWidth:100}}>
+                <div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:mob?12:14,fontWeight:600,color:full?C.green:C.red}}>{filled}/{e.slotsNeeded} filled</div>
+                {sess.role==="volunteer"?e.status==="upcoming"&&(
+                  <button onClick={()=>togSign(e)} disabled={!isSigned&&full} style={{display:"inline-flex",alignItems:"center",gap:5,padding:"9px 14px",border:isSigned?`1px solid ${C.red}`:"none",cursor:(!isSigned&&full)?"not-allowed":"pointer",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.04em",background:isSigned?C.white:full?C.gray:C.red,color:isSigned?C.red:full?C.slate:C.white,opacity:(!isSigned&&full)?0.6:1,borderRadius:4,minHeight:40}}>
+                    {isSigned?"Withdraw":full?"Full":"Sign Up"}
+                  </button>
+                ):isA&&(
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                    <button onClick={()=>setRosterE(e)} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:"6px 8px",color:C.slate,display:"flex",alignItems:"center",gap:4,fontSize:12,borderRadius:4,minHeight:36}}><Users size={12}/>Roster</button>
+                    {canMgr&&e.status==="upcoming"&&<button onClick={()=>setAttE(e)} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:"6px 8px",color:C.slate,display:"flex",alignItems:"center",gap:4,fontSize:12,borderRadius:4,minHeight:36}}><ClipboardCheck size={12}/>Attend</button>}
+                    {canMgr&&<><button onClick={()=>setEditing(e)} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:"6px 8px",color:C.slate,borderRadius:4,minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}><Pencil size={13}/></button><button onClick={()=>setDelE(e)} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:"6px 8px",color:C.slate,borderRadius:4,minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}><Trash2 size={13}/></button></>}
+                    <button onClick={()=>sheetPrint(e,sVols)} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:"6px 8px",color:C.slate,display:"flex",alignItems:"center",gap:3,fontSize:12,borderRadius:4,minHeight:36}}><FileText size={12}/>Sheet</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {fil.length===0&&<div style={{color:C.slate,fontSize:13,padding:24,textAlign:"center",border:`1px dashed ${C.border}`,borderRadius:6}}>No events match filters.</div>}
+    </div>
+    {editing&&<EvForm init={editing==="new"?null:editing} onCancel={()=>setEditing(null)} onSave={saveEv}/>}
+    {attE&&<AttModal ev={attE} vols={vols||[]} onClose={()=>setAttE(null)} onSave={saveAtt}/>}
+    {rosterE&&<Modal title={`Roster — ${rosterE.title}`} onClose={()=>setRosterE(null)}>
+      <p style={{fontSize:13,color:C.slate,margin:"0 0 14px"}}>{fmt(rosterE.date)} · {rosterE.volunteerIds.length}/{rosterE.slotsNeeded} filled</p>
+      {(vols||[]).filter(v=>rosterE.volunteerIds.includes(v.id)).map(v=><div key={v.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${C.border}`}}>
+        <div><div style={{fontWeight:600,fontSize:14,color:C.ink}}>{v.name}</div><div style={{fontSize:11.5,color:C.slate}}>{v.phone} · {v.email}</div></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}><Tag s={v.status}/>{rosterE.attendance?.[v.id]==="present"&&<CheckCircle2 size={13} color={C.green}/>}{rosterE.attendance?.[v.id]==="absent"&&<X size={13} color={C.red}/>}</div>
+      </div>)}
+      {rosterE.volunteerIds.length===0&&<p style={{color:C.slate,fontSize:13}}>No volunteers signed up.</p>}
+    </Modal>}
+    {delE&&<Modal title="Delete Event" onClose={()=>setDelE(null)} footer={<><Btn danger onClick={()=>{pEvs((evs||[]).filter(e=>e.id!==delE.id));setDelE(null);}}>Delete</Btn><Btn secondary onClick={()=>setDelE(null)}>Keep</Btn></>}><p style={{fontSize:14,color:C.ink,lineHeight:1.6}}>Delete <strong>{delE.title}</strong>? All sign-ups will be lost.</p></Modal>}
+  </div>);
+}
+
+function EvForm({init,onCancel,onSave}){
+  const[f,setF]=useState(init||{title:"",category:CATS[0],date:"",startTime:"09:00",endTime:"13:00",location:"",slotsNeeded:5,description:""});
+  return(
+    <Modal title={init?"Edit Event":"New Event"} onClose={onCancel} wide footer={<><Btn disabled={!f.title.trim()||!f.date||!f.location.trim()} onClick={()=>onSave(f)}>Save Event</Btn><Btn secondary onClick={onCancel}>Cancel</Btn></>}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+        <Fld label="Title" half><input style={inp} value={f.title} onChange={e=>setF({...f,title:e.target.value})}/></Fld>
+        <Fld label="Category" half><select style={inp} value={f.category} onChange={e=>setF({...f,category:e.target.value})}>{CATS.map(c=><option key={c}>{c}</option>)}</select></Fld>
+        <Fld label="Date" half><input type="date" style={inp} value={f.date} onChange={e=>setF({...f,date:e.target.value})}/></Fld>
+        <Fld label="Slots Needed" half><input type="number" min={1} style={inp} value={f.slotsNeeded} onChange={e=>setF({...f,slotsNeeded:Number(e.target.value)})}/></Fld>
+        <Fld label="Start Time" half><input type="time" style={inp} value={f.startTime} onChange={e=>setF({...f,startTime:e.target.value})}/></Fld>
+        <Fld label="End Time" half><input type="time" style={inp} value={f.endTime} onChange={e=>setF({...f,endTime:e.target.value})}/></Fld>
+        <Fld label="Location" half><input style={inp} value={f.location} onChange={e=>setF({...f,location:e.target.value})}/></Fld>
+      </div>
+      <Fld label="Description"><textarea style={{...inp,minHeight:80,resize:"vertical"}} value={f.description} onChange={e=>setF({...f,description:e.target.value})}/></Fld>
+    </Modal>
+  );
+}
+
+function AttModal({ev,vols,onClose,onSave}){
+  const[att,setAtt]=useState({...ev.attendance});
+  const signed=(vols||[]).filter(v=>ev.volunteerIds.includes(v.id));
+  return(
+    <Modal title={`Attendance — ${ev.title}`} onClose={onClose} wide footer={<><Btn onClick={()=>onSave(ev,att)}><ClipboardCheck size={13}/>Save & Complete</Btn><Btn secondary onClick={onClose}>Cancel</Btn></>}>
+      <p style={{fontSize:13,color:C.slate,margin:"0 0 14px"}}>{fmt(ev.date)} · {ev.startTime}–{ev.endTime} · {hrsCalc(ev.startTime,ev.endTime)}h per volunteer</p>
+      {signed.map(v=><div key={v.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${C.border}`}}>
+        <div><div style={{fontWeight:600,fontSize:14,color:C.ink}}>{v.name}</div><div style={{fontSize:11.5,color:C.slate}}>{v.chapter}</div></div>
+        <div style={{display:"flex",gap:8}}>
+          {["present","absent"].map(val=><button key={val} onClick={()=>setAtt(a=>({...a,[v.id]:a[v.id]===val?undefined:val}))} style={{padding:"7px 14px",border:`1px solid ${att[v.id]===val?(val==="present"?C.green:C.red):C.border}`,background:att[v.id]===val?(val==="present"?C.gDim:C.rDim):C.white,color:att[v.id]===val?(val==="present"?C.green:C.red):C.slate,cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace",fontSize:11,fontWeight:600,textTransform:"uppercase",borderRadius:4,minHeight:36}}>{val}</button>)}
+        </div>
+      </div>)}
+    </Modal>
+  );
+}
+
+// ─── AVAILABILITY ─────────────────────────────────────────────
+function AvailView({sess,vols,avail,pAvail,isA}){
+  const mob=useIsMobile();
+  const[month,setMonth]=useState(new Date(2026,6,1));
+  const[selV,setSelV]=useState(isA?null:sess.volunteerId);
+  const vid=selV||sess.volunteerId;
+  const vAvail=(avail||{})[vid]||{};
+  const{y,mo,first,count}=useMemo(()=>{const d=month;const y=d.getFullYear(),mo=d.getMonth();return{y,mo,first:new Date(y,mo,1).getDay(),count:new Date(y,mo+1,0).getDate()};},[month]);
+  const cells=useMemo(()=>{const c=[];for(let i=0;i<first;i++)c.push(null);for(let d=1;d<=count;d++){const ds=`${y}-${String(mo+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;c.push({d,ds,st:vAvail[ds]||null});}return c;},[first,count,y,mo,vAvail]);
+  const canEdit=!isA||selV===null;
+  const tog=ds=>{
+    if(!canEdit)return;
+    const cur=vAvail[ds];const nxt=cycleAv(cur);
+    const upd={...vAvail};if(nxt)upd[ds]=nxt;else delete upd[ds];
+    pAvail({...(avail||{}),[vid]:upd});
+  };
+  return(<div>
+    <SecTitle eyebrow={isA?"Team Availability":"My Availability"} title="Availability"/>
+    {isA&&<div style={{marginBottom:16}}><select value={selV||""} onChange={e=>setSelV(e.target.value||null)} style={{...inp,maxWidth:260}}><option value="">Team Overview</option>{(vols||[]).map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></div>}
+    <div style={{background:C.white,border:`1px solid ${C.border}`,padding:mob?14:20,maxWidth:580,borderRadius:6,boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+        <button onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()-1,1))} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:"7px 9px",color:C.ink,borderRadius:4,minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}><ChevronLeft size={16}/></button>
+        <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:20,textTransform:"uppercase",letterSpacing:"0.02em",color:C.ink}}>{MONTHS[mo]} {y}</span>
+        <button onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()+1,1))} style={{background:"none",border:`1px solid ${C.border}`,cursor:"pointer",padding:"7px 9px",color:C.ink,borderRadius:4,minWidth:36,minHeight:36,display:"flex",alignItems:"center",justifyContent:"center"}}><ChevronRight size={16}/></button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:3}}>
+        {DAYS.map(d=><div key={d} style={{textAlign:"center",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,color:C.slate,textTransform:"uppercase",letterSpacing:"0.06em",padding:"4px 0"}}>{mob?d[0]:d}</div>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+        {cells.map((cell,i)=>{
+          if(!cell)return<div key={`e${i}`}/>;
+          const st=cell.st?AVAIL[cell.st]:null;const past=new Date(cell.ds)<new Date(toDay());
+          return(<button key={cell.ds} onClick={()=>!past&&canEdit&&tog(cell.ds)} style={{aspectRatio:"1",border:`1px solid ${st?st.fg:C.border}`,background:st?st.bg:C.white,cursor:past||!canEdit?"default":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1,borderRadius:4,opacity:past?0.4:1,padding:2,minHeight:36}}>
+            <span style={{fontFamily:"Inter,sans-serif",fontSize:mob?12:13,fontWeight:600,color:st?st.fg:C.ink}}>{cell.d}</span>
+            {cell.st&&!mob&&<span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:7,color:st.fg,textTransform:"uppercase",letterSpacing:"0.04em",fontWeight:600}}>{cell.st.slice(0,4)}</span>}
+          </button>);
+        })}
+      </div>
+      <div style={{display:"flex",gap:14,marginTop:14,flexWrap:"wrap"}}>
+        {Object.entries(AVAIL).map(([k,{bg,fg}])=><div key={k} style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:12,height:12,background:bg,border:`1px solid ${fg}`,borderRadius:2}}/><span style={{fontSize:11.5,color:C.slate,textTransform:"capitalize"}}>{k}</span></div>)}
+      </div>
+    </div>
+    {isA&&!selV&&<TeamHeat vols={vols||[]} avail={avail||{}} cells={cells} mo={mo} mob={mob}/>}
+  </div>);
+}
+
+function TeamHeat({vols,avail,cells,mo,mob}){
+  const dc=cells.filter(Boolean);const active=(vols||[]).filter(v=>v.status!=="inactive");
+  if(mob)return<div style={{marginTop:16}}><Alrt type="info">Switch to a volunteer above to view or edit their availability. Team heatmap is available on desktop.</Alrt></div>;
+  return(<div style={{marginTop:20}}>
+    <h3 style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,textTransform:"uppercase",color:C.ink,marginBottom:12}}>Team Heatmap — {MONTHS[mo]}</h3>
+    <div style={{border:`1px solid ${C.border}`,background:C.white,overflowX:"auto",borderRadius:6}}>
+      <div style={{display:"grid",gridTemplateColumns:`160px repeat(${dc.length},26px)`,minWidth:400}}>
+        <div style={{padding:"8px 10px",background:C.ink,color:C.white,fontFamily:"'IBM Plex Mono',monospace",fontSize:10,textTransform:"uppercase"}}>Volunteer</div>
+        {dc.map(c=><div key={c.ds} style={{padding:"8px 0",background:C.ink,color:C.white,fontFamily:"'IBM Plex Mono',monospace",fontSize:9,textAlign:"center"}}>{c.d}</div>)}
+        {active.map(v=>(
+          <React.Fragment key={v.id}>
+            <div style={{padding:"6px 10px",borderTop:`1px solid ${C.border}`,fontSize:12,color:C.ink,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{v.name}</div>
+            {dc.map(c=>{const s=((avail||{})[v.id]||{})[c.ds];const st=s?AVAIL[s]:null;return<div key={c.ds} title={s||""} style={{borderTop:`1px solid ${C.border}`,background:st?st.bg:C.white,display:"flex",alignItems:"center",justifyContent:"center"}}>{s==="available"&&<Check size={9} color={C.green}/>}{s==="unavailable"&&<X size={9} color={C.red}/>}{s==="maybe"&&<Minus size={9} color={C.amber}/>}</div>;})}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  </div>);
+}
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────
+function Notifications({vols,evs,notifs,pNotifs}){
+  const[compose,setCompose]=useState(false);const[sms,setSms]=useState(false);
+  return(<div>
+    <SecTitle eyebrow="Communications" title="Notifications" action={<div style={{display:"flex",gap:8}}><Btn secondary sm onClick={()=>setSms(true)}><MessageSquare size={13}/>SMS</Btn><Btn sm onClick={()=>setCompose(true)}><Send size={13}/>Email</Btn></div>}/>
+    <div style={{border:`1px solid ${C.border}`,background:C.white,borderRadius:6,overflow:"hidden"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 110px 90px",padding:"8px 14px",background:C.ink,color:C.white,fontFamily:"'IBM Plex Mono',monospace",fontSize:10,textTransform:"uppercase",letterSpacing:"0.06em"}}>
+        <span>Subject</span><span>Recipients</span><span>Date</span><span>Type</span>
+      </div>
+      {(notifs||[]).length===0&&<div style={{padding:24,textAlign:"center",color:C.slate,fontSize:13}}>No notifications sent yet.</div>}
+      {[...(notifs||[])].reverse().map(n=><div key={n.id} style={{display:"grid",gridTemplateColumns:"1fr 1fr 110px 90px",padding:"11px 14px",borderTop:`1px solid ${C.border}`,alignItems:"center",fontSize:13}}>
+        <div style={{fontWeight:500,color:C.ink,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n.subject}</div>
+        <div style={{fontSize:12,color:C.slate}}>{n.recipientLabel}</div>
+        <div style={{fontSize:11.5,color:C.slate,fontFamily:"'IBM Plex Mono',monospace"}}>{fmtS(n.sentAt)}</div>
+        <span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10,background:C.pDim,padding:"3px 7px",color:C.slate,textTransform:"uppercase",borderRadius:2}}>{n.type}</span>
+      </div>)}
+    </div>
+    {compose&&<EmailModal vols={vols||[]} evs={evs||[]} onClose={()=>setCompose(false)} onSend={n=>pNotifs([...(notifs||[]),n])}/>}
+    {sms&&<SmsModal vols={vols||[]} evs={evs||[]} onClose={()=>setSms(false)}/>}
+  </div>);
+}
+
+function EmailModal({vols,evs,onClose,onSend}){
+  const[tmpl,setTmpl]=useState("new_event");const[rType,setRType]=useState("all");const[sEv,setSEv]=useState((evs||[])[0]?.id||"");const[sCh,setSCh]=useState(CHAPTERS[0]);
+  const[subj,setSubj]=useState("");const[body,setBody]=useState("");const[copied,setCopied]=useState(false);const[sent,setSent]=useState(false);
+  const upEv=(evs||[]).find(e=>e.id===sEv);
+  useEffect(()=>{
+    const t=EMAIL_TMPLS[tmpl];let s=t.subj,b=t.body;
+    if(upEv){s=s.replace("{event}",upEv.title).replace("{date}",fmt(upEv.date)).replace("{location}",upEv.location);b=b.replace(/{event}/g,upEv.title).replace(/{date}/g,fmt(upEv.date)).replace(/{location}/g,upEv.location);}
+    s=s.replace("{name}","[Volunteer]");b=b.replace(/{name}/g,"[Volunteer]");
+    setSubj(s);setBody(b);
+  },[tmpl,sEv]);
+  const getR=()=>{
+    if(rType==="all")return{emails:(vols||[]).map(v=>v.email),lbl:`All volunteers (${(vols||[]).length})`};
+    if(rType==="chapter"){const vs=(vols||[]).filter(v=>v.chapter===sCh);return{emails:vs.map(v=>v.email),lbl:`${sCh} (${vs.length})`};}
+    if(rType==="event"&&upEv){const vs=(vols||[]).filter(v=>upEv.volunteerIds.includes(v.id));return{emails:vs.map(v=>v.email),lbl:`${upEv.title} sign-ups (${vs.length})`};}
+    return{emails:[],lbl:"None"};
+  };
+  const{emails,lbl}=getR();
+  const send=()=>{window.location.href=`mailto:?bcc=${encodeURIComponent(emails.join(","))}&subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;onSend({id:uid(),subject:subj,type:tmpl,recipientLabel:lbl,sentAt:toDay()});setSent(true);};
+  const copy=()=>{navigator.clipboard.writeText(`TO: ${emails.join(", ")}\nSUBJECT: ${subj}\n\n${body}`).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500);});};
+  return(<Modal title="Compose Email" onClose={onClose} wide footer={!sent&&<><Btn onClick={send}><Send size={13}/>Open Email Client</Btn><Btn secondary onClick={copy}>{copied?<><Check size={13}/>Copied!</>:<><Copy size={13}/>Copy</>}</Btn><Btn secondary onClick={onClose}>Cancel</Btn></>}>
+    {sent?<Alrt type="success">Email client opened! Logged in history.</Alrt>:<>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+        <Fld label="Template" half><select style={inp} value={tmpl} onChange={e=>setTmpl(e.target.value)}>{Object.entries(EMAIL_TMPLS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></Fld>
+        <Fld label="Send To" half><select style={inp} value={rType} onChange={e=>setRType(e.target.value)}><option value="all">All Volunteers</option><option value="chapter">By Chapter</option><option value="event">Event Sign-Ups</option></select></Fld>
+        {rType==="chapter"&&<Fld label="Chapter" half><select style={inp} value={sCh} onChange={e=>setSCh(e.target.value)}>{CHAPTERS.map(c=><option key={c}>{c}</option>)}</select></Fld>}
+        {rType==="event"&&<Fld label="Event" half><select style={inp} value={sEv} onChange={e=>setSEv(e.target.value)}>{(evs||[]).map(e=><option key={e.id} value={e.id}>{e.title}</option>)}</select></Fld>}
+      </div>
+      <div style={{background:C.pDim,padding:"8px 12px",marginBottom:12,fontSize:12.5,color:C.slate,borderRadius:4}}><strong style={{color:C.ink}}>To:</strong> {lbl} · {emails.length} email{emails.length!==1?"s":""}</div>
+      <Fld label="Subject"><input style={inp} value={subj} onChange={e=>setSubj(e.target.value)}/></Fld>
+      <Fld label="Body"><textarea style={{...inp,minHeight:170,resize:"vertical",fontFamily:"Inter,sans-serif",lineHeight:1.6}} value={body} onChange={e=>setBody(e.target.value)}/></Fld>
+    </>}
+  </Modal>);
+}
+
+function SmsModal({vols,evs,onClose}){
+  const[tmpl,setTmpl]=useState("event_reminder");const[sEv,setSEv]=useState((evs||[])[0]?.id||"");const[copied,setCopied]=useState({});
+  const upEv=(evs||[]).find(e=>e.id===sEv);
+  const buildSms=(v)=>{
+    let t=SMS_TMPLS[tmpl];
+    t=t.replace(/{name}/g,v.name.split(" ")[0]);
+    if(upEv){t=t.replace(/{event}/g,upEv.title).replace(/{date}/g,fmt(upEv.date)).replace(/{location}/g,upEv.location);}
+    t=t.replace(/{cert}/g,"certification");
+    return t;
+  };
+  const signedVols=upEv?(vols||[]).filter(v=>upEv.volunteerIds.includes(v.id)):vols||[];
+  const copy=(vid,text)=>{navigator.clipboard.writeText(text).then(()=>{setCopied(c=>({...c,[vid]:true}));setTimeout(()=>setCopied(c=>({...c,[vid]:false})),2000);});};
+  return(<Modal title="SMS Message Templates" onClose={onClose} wide>
+    <Alrt type="info">Copy each message and send via WhatsApp, SMS, or any messaging app.</Alrt>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px",marginBottom:14}}>
+      <Fld label="Template" half><select style={inp} value={tmpl} onChange={e=>setTmpl(e.target.value)}>{Object.entries(SMS_TMPLS).map(([k])=><option key={k} value={k}>{k.replace(/_/g," ")}</option>)}</select></Fld>
+      {(tmpl==="event_reminder"||tmpl==="new_event")&&<Fld label="Event" half><select style={inp} value={sEv} onChange={e=>setSEv(e.target.value)}>{(evs||[]).map(e=><option key={e.id} value={e.id}>{e.title}</option>)}</select></Fld>}
+    </div>
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {(tmpl==="event_reminder"?signedVols:vols||[]).slice(0,10).map(v=>{
+        const msg=buildSms(v);
+        return(<div key={v.id} style={{border:`1px solid ${C.border}`,padding:12,borderRadius:6,background:C.white}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{fontWeight:600,fontSize:13.5,color:C.ink}}>{v.name}<span style={{fontSize:12,color:C.slate,fontWeight:400,marginLeft:8}}>{v.phone}</span></div>
+            <button onClick={()=>copy(v.id,msg)} style={{background:copied[v.id]?C.gDim:C.pDim,border:`1px solid ${copied[v.id]?C.green:C.border}`,cursor:"pointer",padding:"5px 10px",color:copied[v.id]?C.green:C.slate,fontSize:11,fontFamily:"'IBM Plex Mono',monospace",fontWeight:600,textTransform:"uppercase",borderRadius:4,display:"flex",alignItems:"center",gap:5}}>{copied[v.id]?<><Check size={12}/>Copied</>:<><Copy size={12}/>Copy</>}</button>
+          </div>
+          <div style={{fontSize:12.5,color:C.slate,lineHeight:1.5,background:C.pDim,padding:"8px 10px",borderRadius:4,whiteSpace:"pre-wrap"}}>{msg}</div>
+        </div>);
+      })}
+    </div>
+  </Modal>);
+}
+
+// ─── REPORTS ──────────────────────────────────────────────────
+function Reports({vols,evs}){
+  const mob=useIsMobile();
+  const totH=(vols||[]).reduce((s,v)=>s+(v.totalHours||0),0);
+  const done=(evs||[]).filter(e=>e.status==="completed");
+  const topV=[...(vols||[])].sort((a,b)=>(b.totalHours||0)-(a.totalHours||0)).slice(0,6);
+  const byCh=CHAPTERS.map(c=>({c,n:(vols||[]).filter(v=>v.chapter===c).length,h:(vols||[]).filter(v=>v.chapter===c).reduce((s,v)=>s+(v.totalHours||0),0)})).filter(x=>x.n>0);
+  const expC=(vols||[]).filter(v=>expired(v.backgroundCheck?.expiry)||(v.certs||[]).some(c=>expired(c.expiry))).length;
+  return(<div>
+    <SecTitle eyebrow="Analytics & Export" title="Reports"/>
+    <div style={{display:"flex",gap:10,marginBottom:24,flexWrap:"wrap"}}>
+      {[{l:"Volunteer Roster CSV",fn:()=>exportCSV((vols||[]).map(v=>({Name:v.name,Email:v.email,Phone:v.phone,Chapter:v.chapter,Status:v.status,"Hours":v.totalHours||0,Emergency:v.emergencyContact||"",Skills:(v.skills||[]).join(";"),"BG Status":v.backgroundCheck?.status||"","BG Expiry":v.backgroundCheck?.expiry||"",Joined:v.joined,Notes:v.notes||""})),"thl_volunteers.csv"),I:Users},{l:"Events Log CSV",fn:()=>exportCSV((evs||[]).map(e=>({Title:e.title,Category:e.category,Date:e.date,Start:e.startTime,End:e.endTime,Location:e.location,Status:e.status,"Slots":e.slotsNeeded,"Signed Up":e.volunteerIds.length,"Attended":Object.values(e.attendance||{}).filter(v=>v==="present").length})),"thl_events.csv"),I:CalendarDays},{l:"Attendance Log CSV",fn:()=>exportCSV(done.flatMap(e=>(e.volunteerIds||[]).map(vid=>{const v=(vols||[]).find(x=>x.id===vid)||{};return{Event:e.title,Date:e.date,Volunteer:v.name||vid,Chapter:v.chapter||"",Hours:hrsCalc(e.startTime,e.endTime),Attended:e.attendance?.[vid]||"unrecorded"};})),"thl_attendance.csv"),I:ClipboardCheck},{l:"Print Roster",fn:()=>rosterPrint(vols||[]),I:FileText}].map(({l,fn,I})=>(
+        <div key={l} onClick={fn} style={{background:C.white,border:`1px solid ${C.border}`,padding:16,flex:mob?"1 1 calc(50% - 5px)":"1 1 170px",cursor:"pointer",borderRadius:6,boxShadow:"0 1px 4px rgba(0,0,0,0.04)",transition:"box-shadow 0.15s"}} onMouseOver={e=>e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,0.1)"} onMouseOut={e=>e.currentTarget.style.boxShadow="0 1px 4px rgba(0,0,0,0.04)"}>
+          <div style={{display:"flex",justifyContent:"space-between"}}><I size={18} color={C.red}/><Download size={13} color={C.slate}/></div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:15,color:C.ink,marginTop:10,textTransform:"uppercase"}}>{l}</div>
+        </div>
+      ))}
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:20}}>
+      <div>
+        <h3 style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,textTransform:"uppercase",color:C.ink,marginBottom:12}}>Top Volunteers by Hours</h3>
+        {topV.map((v,i)=>{const pct=topV[0].totalHours>0?((v.totalHours||0)/topV[0].totalHours)*100:0;return(
+          <div key={v.id} style={{marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:3}}><span style={{fontWeight:600,color:C.ink}}>{v.name}</span><span style={{fontFamily:"'IBM Plex Mono',monospace",color:C.slate}}>{v.totalHours||0}h</span></div>
+            <div style={{height:6,background:C.gray,borderRadius:3}}><div style={{height:6,background:i===0?C.red:i<3?C.amber:C.slate,width:`${pct}%`,borderRadius:3,transition:"width 0.5s"}}/></div>
+          </div>
+        );})}
+      </div>
+      <div>
+        <h3 style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,textTransform:"uppercase",color:C.ink,marginBottom:12}}>Chapter Summary</h3>
+        <div style={{border:`1px solid ${C.border}`,background:C.white,borderRadius:6,overflow:"hidden",marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 70px 70px",padding:"7px 12px",background:C.ink,color:C.white,fontFamily:"'IBM Plex Mono',monospace",fontSize:10,textTransform:"uppercase"}}><span>Chapter</span><span>Vols</span><span>Hrs</span></div>
+          {byCh.map(r=><div key={r.c} style={{display:"grid",gridTemplateColumns:"1fr 70px 70px",padding:"9px 12px",borderTop:`1px solid ${C.border}`,fontSize:13}}><span style={{color:C.ink}}>{r.c}</span><span style={{fontFamily:"'IBM Plex Mono',monospace",color:C.slate}}>{r.n}</span><span style={{fontFamily:"'IBM Plex Mono',monospace",color:C.slate}}>{r.h}</span></div>)}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 70px 70px",padding:"9px 12px",borderTop:`2px solid ${C.border}`,fontSize:13,fontWeight:700,background:C.pDim}}><span>Total</span><span style={{fontFamily:"'IBM Plex Mono',monospace"}}>{(vols||[]).length}</span><span style={{fontFamily:"'IBM Plex Mono',monospace"}}>{totH}</span></div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div style={{background:C.white,border:`1px solid ${C.border}`,padding:14,borderRadius:6}}><div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10,color:C.slate,textTransform:"uppercase",letterSpacing:"0.06em"}}>Events Done</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:30,color:C.ink}}>{done.length}</div></div>
+          <div style={{background:C.white,border:`1px solid ${C.border}`,padding:14,borderRadius:6}}><div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10,color:C.slate,textTransform:"uppercase",letterSpacing:"0.06em"}}>Compliance Issues</div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:30,color:expC>0?C.red:C.green}}>{expC}</div></div>
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
+// ─── APPROVALS ────────────────────────────────────────────────
+function Approvals({pending,pPending,users,pUsers,vols,pVols}){
+  const[done,setDone]=useState([]);
+  const approve=p=>{
+    const nv={id:uid(),userId:p.id,name:p.name,email:p.email,phone:"",chapter:p.chapter,skills:[],status:"active",joined:toDay(),emergencyContact:"",backgroundCheck:{status:"pending",date:null,expiry:null},certs:[],notes:"",totalHours:0};
+    const nu={...p,role:"volunteer",volunteerId:nv.id};delete nu.requestedAt;
+    pUsers([...(users||[]),nu]);pVols([...(vols||[]),nv]);
+    pPending((pending||[]).filter(x=>x.id!==p.id));
+    setDone(d=>[...d,{...p,action:"approved"}]);
+  };
+  const reject=p=>{pPending((pending||[]).filter(x=>x.id!==p.id));setDone(d=>[...d,{...p,action:"rejected"}]);};
+  return(<div>
+    <SecTitle eyebrow={`${(pending||[]).length} pending`} title="Volunteer Approvals"/>
+    {done.map(d=><Alrt key={d.id} type={d.action==="approved"?"success":"error"}><strong>{d.name}</strong> has been <strong>{d.action}</strong>.{d.action==="approved"?" They can now sign in as a volunteer.":""}</Alrt>)}
+    {(pending||[]).length===0&&done.length===0&&<div style={{border:`1px dashed ${C.border}`,padding:36,textAlign:"center",borderRadius:6}}><CheckCircle2 size={30} color={C.green} style={{margin:"0 auto 10px"}}/><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,textTransform:"uppercase",color:C.ink}}>All caught up!</div><div style={{fontSize:13,color:C.slate,marginTop:4}}>No pending applications.</div></div>}
+    {(pending||[]).map(p=>(
+      <div key={p.id} style={{background:C.white,border:`1px solid ${C.border}`,padding:18,marginBottom:12,borderRadius:6,boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+          <div><div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,color:C.ink}}>{p.name}</div>
+          <div style={{fontSize:13,color:C.slate,marginTop:4,display:"flex",gap:12,flexWrap:"wrap"}}>
+            <span style={{display:"flex",alignItems:"center",gap:4}}><Mail size={12}/>{p.email}</span>
+            <span style={{display:"flex",alignItems:"center",gap:4}}><MapPin size={12}/>{p.chapter}</span>
+            <span style={{display:"flex",alignItems:"center",gap:4}}><Clock size={12}/>Applied {fmt(p.requestedAt)}</span>
+          </div></div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}><Btn sm onClick={()=>approve(p)}><Check size={13}/>Approve</Btn><Btn danger sm onClick={()=>reject(p)}><X size={13}/>Reject</Btn></div>
+        </div>
+      </div>
+    ))}
+  </div>);
+}
+
+// ─── VOLUNTEER HOME ───────────────────────────────────────────
+function VolHome({sess,vols,evs}){
+  const mob=useIsMobile();
+  const me=(vols||[]).find(v=>v.id===sess.volunteerId);
+  const myUp=(evs||[]).filter(e=>e.volunteerIds.includes(sess.volunteerId)&&e.status==="upcoming").sort((a,b)=>a.date.localeCompare(b.date));
+  if(!me)return<div style={{color:C.slate,fontSize:14,padding:20,textAlign:"center",border:`1px dashed ${C.border}`,borderRadius:6,marginTop:20}}>Profile not linked yet. Contact your chapter admin to set up your account.</div>;
+  const aw=[...(me.certs||[]).filter(c=>expired(c.expiry)||expiring(c.expiry)).map(c=>c.name),expired(me.backgroundCheck?.expiry)?"Background Check":null].filter(Boolean);
+  return(<div>
+    <SecTitle eyebrow={`Welcome back`} title={me.name.split(" ")[0]}/>
+    {aw.length>0&&<Alrt type="warn">Action needed: <strong>{aw.join(", ")}</strong> — please contact your chapter coordinator.</Alrt>}
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:24}}>
+      <SC l="Hours Logged" v={me.totalHours||0} I={Clock} sub="all time"/>
+      <SC l="Upcoming Shifts" v={myUp.length} I={CalendarDays} acc={C.red}/>
+      <SC l="Attended" v={(evs||[]).filter(e=>e.attendance?.[me.id]==="present").length} I={CheckCircle2} acc={C.green}/>
+    </div>
+    <h3 style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,textTransform:"uppercase",color:C.ink,marginBottom:12}}>My Upcoming Shifts</h3>
+    {myUp.length===0&&<div style={{color:C.slate,fontSize:13,padding:20,border:`1px dashed ${C.border}`,textAlign:"center",borderRadius:6}}>No upcoming shifts. Head to Events to sign up.</div>}
+    {myUp.map(e=><div key={e.id} style={{background:C.white,border:`1px solid ${C.border}`,borderLeft:`4px solid ${C.red}`,padding:mob?"12px 14px":"14px 18px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,borderRadius:"0 6px 6px 0",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+      <div><div style={{fontWeight:600,fontSize:mob?14:15,color:C.ink}}>{e.title}</div><div style={{fontSize:12,color:C.slate,marginTop:2}}>{fmt(e.date)} · {e.startTime}–{e.endTime} · {e.location}</div></div>
+      <div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:13,color:C.slate,fontWeight:600}}>{hrsCalc(e.startTime,e.endTime)}h</div>
+    </div>)}
+  </div>);
+}
+
+// ─── PROFILE ──────────────────────────────────────────────────
+function Profile({sess,vols,evs,pVols}){
+  const mob=useIsMobile();
+  const me=(vols||[]).find(v=>v.id===sess.volunteerId);
+  const[editing,setEditing]=useState(false);const[f,setF]=useState(null);
+  const myEvs=(evs||[]).filter(e=>e.volunteerIds.includes(sess.volunteerId)).sort((a,b)=>b.date.localeCompare(a.date));
+  if(!me)return<div style={{color:C.slate}}>Profile not linked. Contact your admin.</div>;
+  const save=()=>{pVols((vols||[]).map(v=>v.id===me.id?{...me,...f,id:me.id,userId:me.userId,totalHours:me.totalHours,backgroundCheck:me.backgroundCheck,certs:me.certs}:v));setEditing(false);};
+  return(<div>
+    <SecTitle eyebrow="Volunteer Record" title="My Profile" action={<div style={{display:"flex",gap:8}}>{!editing&&<Btn sm onClick={()=>{setF({...me});setEditing(true);}}><Pencil size={12}/>Edit</Btn>}<Btn secondary sm onClick={()=>idCardPrint(me)}><IdCard size={12}/>ID Card</Btn></div>}/>
+    {editing&&f?(
+      <div style={{background:C.white,border:`1px solid ${C.border}`,padding:20,marginBottom:20,borderRadius:6}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+          <Fld label="Full Name" half><input style={inp} value={f.name} onChange={e=>setF({...f,name:e.target.value})}/></Fld>
+          <Fld label="Phone" half><input style={inp} value={f.phone||""} onChange={e=>setF({...f,phone:e.target.value})}/></Fld>
+        </div>
+        <Fld label="Emergency Contact (name · phone)"><input style={inp} value={f.emergencyContact||""} onChange={e=>setF({...f,emergencyContact:e.target.value})} placeholder="e.g. Fatou Ibarra · 220-770-9900"/></Fld>
+        <Fld label="Skills"><TagTog opts={SKILLS} sel={f.skills||[]} onTog={s=>setF(p=>({...p,skills:p.skills.includes(s)?p.skills.filter(x=>x!==s):[...p.skills,s]}))}/></Fld>
+        <Fld label="Notes"><textarea style={{...inp,minHeight:60,resize:"vertical"}} value={f.notes||""} onChange={e=>setF({...f,notes:e.target.value})}/></Fld>
+        <div style={{display:"flex",gap:8}}><Btn sm onClick={save}>Save Changes</Btn><Btn secondary sm onClick={()=>setEditing(false)}>Cancel</Btn></div>
+      </div>
+    ):(
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:20}}>
+        <div style={{background:C.white,border:`1px solid ${C.border}`,padding:20,flex:"1 1 240px",borderRadius:6,boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:22,color:C.ink,marginBottom:6}}>{me.name}</div>
+          <Tag s={me.status}/>
+          <div style={{marginTop:12}}><IR icon={Mail} label={me.email}/><IR icon={Phone} label={me.phone||"—"}/><IR icon={MapPin} label={me.chapter}/>{me.emergencyContact&&<IR icon={HeartPulse} label={me.emergencyContact}/>}<IR icon={Clock} label={`${me.totalHours||0} hours logged`}/></div>
+          <div style={{marginTop:12}}><Lbl>Skills</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{(me.skills||[]).map(s=><span key={s} style={{fontSize:11,background:C.pDim,padding:"3px 7px",color:C.ink,fontFamily:"'IBM Plex Mono',monospace",borderRadius:2}}>{s}</span>)}</div></div>
+        </div>
+        <div style={{flex:"1 1 240px"}}>
+          <Lbl>Certifications</Lbl>
+          <div style={{background:C.white,border:`1px solid ${C.border}`,marginBottom:12,borderRadius:6,overflow:"hidden"}}>
+            {(me.certs||[]).length===0&&<div style={{padding:12,fontSize:13,color:C.slate,fontStyle:"italic"}}>No certifications on file.</div>}
+            {(me.certs||[]).map(c=><div key={c.id} style={{padding:"10px 14px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:13.5,fontWeight:600,color:C.ink}}>{c.name}</span><span style={{fontSize:12,color:expired(c.expiry)?C.red:expiring(c.expiry)?C.amber:C.slate}}>Exp {fmt(c.expiry)}{(expired(c.expiry)||expiring(c.expiry))&&" ⚠"}</span></div>)}
+          </div>
+          <Lbl>Background Check</Lbl>
+          <div style={{background:C.white,border:`1px solid ${C.border}`,padding:"10px 14px",display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",borderRadius:6}}><Tag s={me.backgroundCheck?.status||"pending"} type="bg"/>{me.backgroundCheck?.expiry&&<span style={{fontSize:12,color:C.slate}}>Expires {fmt(me.backgroundCheck.expiry)}</span>}</div>
+        </div>
+      </div>
+    )}
+    <h3 style={{fontFamily:"'Barlow Condensed',sans-serif",fontWeight:800,fontSize:18,textTransform:"uppercase",color:C.ink,marginBottom:12}}>Event History</h3>
+    <div style={{border:`1px solid ${C.border}`,background:C.white,borderRadius:6,overflow:"hidden"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 80px 80px",padding:"8px 14px",background:C.ink,color:C.white,fontFamily:"'IBM Plex Mono',monospace",fontSize:10,textTransform:"uppercase",letterSpacing:"0.05em"}}><span>Event</span><span>Date</span><span>Hours</span><span>Status</span></div>
+      {myEvs.map(e=><div key={e.id} style={{display:"grid",gridTemplateColumns:"1fr 1fr 80px 80px",padding:"10px 14px",borderTop:`1px solid ${C.border}`,fontSize:13,alignItems:"center"}}>
+        <span style={{color:C.ink,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.title}</span>
+        <span style={{color:C.slate}}>{fmtS(e.date)}</span>
+        <span style={{fontFamily:"'IBM Plex Mono',monospace",color:C.slate}}>{e.status==="completed"&&e.attendance?.[me.id]==="present"?`${hrsCalc(e.startTime,e.endTime)}h`:"—"}</span>
+        <span>{e.attendance?.[me.id]==="present"?<CheckCircle2 size={13} color={C.green}/>:e.attendance?.[me.id]==="absent"?<X size={13} color={C.red}/>:<span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:10,color:C.slate,textTransform:"uppercase"}}>{e.status}</span>}</span>
+      </div>)}
+      {myEvs.length===0&&<div style={{padding:16,textAlign:"center",color:C.slate,fontSize:13}}>No event history yet.</div>}
+    </div>
+  </div>);
+}
+
+// ─── APP ──────────────────────────────────────────────────────
+function App(){
+  const[users,pUsers,uR]=useStore("thl_users_v3",SU);
+  const[pending,pPending,pR]=useStore("thl_pending_v3",[]);
+  const[vols,pVols,vR]=useStore("thl_vols_v3",SV);
+  const[evs,pEvs,eR]=useStore("thl_evs_v3",SE);
+  const[avail,pAvail,aR]=useStore("thl_avail_v3",{});
+  const[notifs,pNotifs,nR]=useStore("thl_notifs_v3",[]);
+  const[sess,setSess]=useState(null);
+  const ready=uR&&pR&&vR&&eR&&aR&&nR;
+
+  if(!ready)return(
+    <div style={{minHeight:"100vh",background:C.bar,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <style>{FONTS}</style>
+      <div style={{textAlign:"center"}}><ThlLogo size={52}/><div style={{fontFamily:"'IBM Plex Mono',monospace",color:"#6b7280",fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",marginTop:14}}>Loading {ORG.name}…</div></div>
+    </div>
+  );
+  if(!sess)return<Auth users={users||[]} pending={pending||[]} onLogin={setSess} onReg={p=>pPending([...(pending||[]),p])}/>;
+  return(
+    <Shell sess={sess} users={users||[]} pending={pending||[]} vols={vols||[]} evs={evs||[]} avail={avail||{}} notifs={notifs||[]}
+      onLogout={()=>setSess(null)} pUsers={pUsers} pPending={pPending} pVols={pVols} pEvs={pEvs} pAvail={pAvail} pNotifs={pNotifs}/>
+  );
+}
+
+
+const _root = ReactDOM.createRoot(document.getElementById("root"));
+_root.render(React.createElement(App));
+document.getElementById("thl-loading").style.display="none";
+
+</script>
+</body>
+</html>
