@@ -1,1 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Volunteer Portal</title>
+<style>
+  :root{
+    --primary:#4f46e5;
+    --primary-dark:#4338ca;
+    --bg:#f4f5f9;
+    --card:#ffffff;
+    --danger:#e11d48;
+    --danger-dark:#be123c;
+    --success:#16a34a;
+    --text:#1f2937;
+    --muted:#6b7280;
+    --border:#e5e7eb;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    -webkit-tap-highlight-color:transparent;
+  }
+  #app{min-height:100vh; display:flex; flex-direction:column;}
 
+  /* ---------- Login ---------- */
+  .login-wrap{
+    min-height:100vh; display:flex; align-items:center; justify-content:center;
+    padding:24px; background:linear-gradient(160deg,var(--primary),#7c3aed);
+  }
+  .login-card{
+    background:var(--card); border-radius:16px; padding:28px 24px; width:100%; max-width:380px;
+    box-shadow:0 10px 30px rgba(0,0,0,.2);
+  }
+  .login-card h1{margin:0 0 4px; font-size:22px; text-align:center;}
+  .login-card p.sub{margin:0 0 20px; text-align:center; color:var(--muted); font-size:13px;}
+  .login-hint{
+    background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; font-size:12px;
+    padding:10px 12px; border-radius:10px; margin-bottom:16px; line-height:1.5;
+  }
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:13px; font-weight:600; margin-bottom:6px; color:var(--text);}
+  .field input, .field select, .field textarea{
+    width:100%; padding:12px 14px; border:1px solid var(--border); border-radius:10px;
+    font-size:15px; background:#fff; color:var(--text);
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{outline:2px solid var(--primary); border-color:var(--primary);}
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:12px 16px; border-radius:10px; border:none; font-size:15px; font-weight:600;
+    cursor:pointer; background:var(--primary); color:#fff; width:100%;
+  }
+  .btn:active{background:var(--primary-dark);}
+  .btn-secondary{background:#eef0f4; color:var(--text);}
+  .btn-danger{background:var(--danger); color:#fff;}
+  .btn-danger:active{background:var(--danger-dark);}
+  .btn-outline{background:transparent; border:1px solid var(--primary); color:var(--primary);}
+  .btn-sm{padding:8px 12px; font-size:13px; width:auto;}
+  .error-msg{color:var(--danger); font-size:13px; margin:-6px 0 14px; min-height:1px;}
+
+  /* ---------- Shell ---------- */
+  .topbar{
+    background:var(--primary); color:#fff; padding:14px 16px; display:flex;
+    align-items:center; justify-content:space-between; position:sticky; top:0; z-index:10;
+  }
+  .topbar .title{font-size:17px; font-weight:700;}
+  .topbar .title small{display:block; font-size:11px; font-weight:400; opacity:.85;}
+  .topbar .logout-btn{
+    background:rgba(255,255,255,.15); border:none; color:#fff; padding:8px 12px;
+    border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .content{flex:1; padding:16px; padding-bottom:90px; max-width:640px; margin:0 auto; width:100%;}
+
+  .bottomnav{
+    position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--border);
+    display:flex; padding:6px 4px calc(6px + env(safe-area-inset-bottom)); z-index:20;
+  }
+  .bottomnav button{
+    flex:1; background:none; border:none; display:flex; flex-direction:column; align-items:center;
+    gap:2px; padding:6px 2px; font-size:11px; color:var(--muted); cursor:pointer; border-radius:10px;
+  }
+  .bottomnav button .ic{font-size:20px;}
+  .bottomnav button.active{color:var(--primary); background:#eef0ff;}
+
+  /* ---------- Cards / lists ---------- */
+  .grid-stats{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px;}
+  .stat-card{background:var(--card); border-radius:14px; padding:16px; box-shadow:0 1px 4px rgba(0,0,0,.06);}
+  .stat-card .num{font-size:26px; font-weight:800; color:var(--primary);}
+  .stat-card .label{font-size:12px; color:var(--muted); margin-top:2px;}
+
+  .section-title{font-size:15px; font-weight:700; margin:18px 0 10px; display:flex; align-items:center; justify-content:space-between;}
+  .card{background:var(--card); border-radius:14px; padding:14px; margin-bottom:10px; box-shadow:0 1px 4px rgba(0,0,0,.06);}
+  .card .row1{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .card h3{margin:0; font-size:15px;}
+  .card .meta{font-size:12px; color:var(--muted); margin-top:4px;}
+  .badge{display:inline-block; font-size:11px; padding:3px 8px; border-radius:20px; font-weight:600;}
+  .badge-green{background:#dcfce7; color:#166534;}
+  .badge-red{background:#fee2e2; color:#991b1b;}
+  .badge-gray{background:#f1f5f9; color:#475569;}
+  .badge-indigo{background:#e0e7ff; color:#3730a3;}
+
+  .icon-btn{
+    background:none; border:none; font-size:18px; cursor:pointer; padding:6px 8px; border-radius:8px;
+  }
+  .icon-btn.danger{color:var(--danger);}
+  .icon-btn:active{background:#f1f1f1;}
+
+  .toolbar{display:flex; gap:8px; margin-bottom:12px;}
+  .toolbar input[type="text"]{
+    flex:1; padding:11px 12px; border:1px solid var(--border); border-radius:10px; font-size:14px;
+  }
+  .toolbar .btn{width:auto; padding:11px 16px;}
+
+  .add-form{background:var(--card); border-radius:14px; padding:16px; margin-bottom:14px; border:1px dashed var(--primary);}
+  .add-form h4{margin:0 0 12px; font-size:14px;}
+  .form-actions{display:flex; gap:8px; margin-top:4px;}
+  .checkbox-row{display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:14px;}
+  .checkbox-row input{width:auto;}
+
+  .empty-state{text-align:center; padding:30px 10px; color:var(--muted); font-size:14px;}
+  .empty-state .ic{font-size:34px; display:block; margin-bottom:8px;}
+
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th, td{text-align:left; padding:8px 6px; border-bottom:1px solid var(--border);}
+  th{color:var(--muted); font-weight:600; font-size:12px;}
+
+  .status-btns{display:flex; gap:6px;}
+  .status-btn{
+    flex:1; padding:8px 4px; border-radius:8px; border:1px solid var(--border); background:#fff;
+    font-size:12px; font-weight:600; cursor:pointer; color:var(--muted);
+  }
+  .status-btn.present.active{background:#dcfce7; border-color:#16a34a; color:#166534;}
+  .status-btn.absent.active{background:#fee2e2; border-color:#e11d48; color:#991b1b;}
+
+  .welcome-card{
+    background:linear-gradient(135deg,var(--primary),#7c3aed); color:#fff; border-radius:16px;
+    padding:18px; margin-bottom:16px;
+  }
+  .welcome-card h2{margin:0 0 4px; font-size:19px;}
+  .welcome-card p{margin:0; font-size:13px; opacity:.9;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ============================= STORAGE HELPERS ============================= */
+const K_USERS='vp_users', K_VOLUNTEERS='vp_volunteers', K_EVENTS='vp_events',
+      K_ATT='vp_attendance', K_SESSION='vp_current_user';
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function escapeHtml(str){
+  return String(str==null?'':str).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+function getData(key){ try{ return JSON.parse(localStorage.getItem(key)) || []; }catch(e){ return []; } }
+function setData(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
+
+function getUsers(){ return getData(K_USERS); }
+function setUsers(v){ setData(K_USERS, v); }
+function getVolunteers(){ return getData(K_VOLUNTEERS); }
+function setVolunteers(v){ setData(K_VOLUNTEERS, v); }
+function getEvents(){ return getData(K_EVENTS); }
+function setEvents(v){ setData(K_EVENTS, v); }
+function getAttendance(){ return getData(K_ATT); }
+function setAttendance(v){ setData(K_ATT, v); }
+
+function seedIfEmpty(){
+  if(getUsers().length===0){
+    setUsers([{id:uid(), username:'admin', password:'admin123', role:'admin', name:'Administrator'}]);
+  }
+}
+
+/* ============================= APP STATE ============================= */
+let currentUser = null;
+let currentPage = 'dashboard';
+let showAddVolunteerForm = false;
+let showAddEventForm = false;
+let volunteerSearch = '';
+let selectedEventId = null;
+let loginError = '';
+
+/* ============================= INIT ============================= */
+function initApp(){
+  seedIfEmpty();
+  const saved = localStorage.getItem(K_SESSION);
+  if(saved){ try{ currentUser = JSON.parse(saved); }catch(e){ currentUser=null; } }
+  render();
+}
+
+/* ============================= AUTH ============================= */
+function doLogin(username, password){
+  const user = getUsers().find(u => u.username.toLowerCase()===username.trim().toLowerCase() && u.password===password);
+  if(!user){ loginError = 'Invalid username or password.'; render(); return; }
+  currentUser = user;
+  loginError='';
+  localStorage.setItem(K_SESSION, JSON.stringify(user));
+  currentPage='dashboard';
+  render();
+}
+function doLogout(){
+  currentUser=null;
+  localStorage.removeItem(K_SESSION);
+  render();
+}
+
+/* ============================= RENDER ROOT ============================= */
+function render(){
+  const app = document.getElementById('app');
+  if(!currentUser){
+    app.innerHTML = renderLogin();
+    bindLoginEvents();
+  } else {
+    app.innerHTML = renderShell();
+    bindShellEvents();
+  }
+}
+
+/* ============================= LOGIN VIEW ============================= */
+function renderLogin(){
+  return `
+  <div class="login-wrap">
+    <div class="login-card">
+      <h1>🤝 Volunteer Portal</h1>
+      <p class="sub">Sign in to continue</p>
+      <div class="login-hint">Default admin login &mdash; username: <b>admin</b> &nbsp; password: <b>admin123</b></div>
+      <form id="loginForm">
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="loginUsername" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="loginPassword" autocomplete="current-password" required>
+        </div>
+        <div class="error-msg">${escapeHtml(loginError)}</div>
+        <button type="submit" class="btn">Log In</button>
+      </form>
+    </div>
+  </div>`;
+}
+function bindLoginEvents(){
+  const form = document.getElementById('loginForm');
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    doLogin(document.getElementById('loginUsername').value, document.getElementById('loginPassword').value);
+  });
+}
+
+/* ============================= APP SHELL ============================= */
+function renderShell(){
+  const isAdmin = currentUser.role==='admin';
+  return `
+  <div class="topbar">
+    <div class="title">Volunteer Portal<small>Hi, ${escapeHtml(currentUser.name||currentUser.username)} (${isAdmin?'Admin':'Volunteer'})</small></div>
+    <button class="logout-btn" id="logoutBtn">Log Out</button>
+  </div>
+  <div class="content" id="pageContent"></div>
+  <nav class="bottomnav">
+    <button data-page="dashboard" class="${currentPage==='dashboard'?'active':''}"><span class="ic">🏠</span>Home</button>
+    ${isAdmin? `<button data-page="volunteers" class="${currentPage==='volunteers'?'active':''}"><span class="ic">👥</span>Volunteers</button>` : ''}
+    <button data-page="events" class="${currentPage==='events'?'active':''}"><span class="ic">📅</span>Events</button>
+    <button data-page="attendance" class="${currentPage==='attendance'?'active':''}"><span class="ic">✅</span>Attendance</button>
+  </nav>`;
+}
+
+function bindShellEvents(){
+  document.getElementById('logoutBtn').addEventListener('click', doLogout);
+  document.querySelectorAll('.bottomnav button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      currentPage = btn.dataset.page;
+      showAddVolunteerForm=false; showAddEventForm=false;
+      render();
+    });
+  });
+  renderPage();
+}
+
+/* ============================= PAGE ROUTER ============================= */
+function renderPage(){
+  const el = document.getElementById('pageContent');
+  if(currentPage==='dashboard') el.innerHTML = renderDashboard();
+  else if(currentPage==='volunteers') el.innerHTML = renderVolunteers();
+  else if(currentPage==='events') el.innerHTML = renderEvents();
+  else if(currentPage==='attendance') el.innerHTML = renderAttendance();
+  bindPageEvents();
+}
+
+/* ============================= DASHBOARD ============================= */
+function renderDashboard(){
+  const isAdmin = currentUser.role==='admin';
+  const volunteers = getVolunteers();
+  const events = getEvents();
+  const attendance = getAttendance();
+  const upcoming = events.filter(e=>e.date>=todayStr()).sort((a,b)=>a.date.localeCompare(b.date));
+
+  if(isAdmin){
+    const presentToday = attendance.filter(a=>a.time && a.time.slice(0,10)===todayStr() && a.status==='present').length;
+    return `
+    <div class="welcome-card">
+      <h2>Welcome back 👋</h2>
+      <p>Here's what's happening with your volunteer program.</p>
+    </div>
+    <div class="grid-stats">
+      <div class="stat-card"><div class="num">${volunteers.length}</div><div class="label">Total Volunteers</div></div>
+      <div class="stat-card"><div class="num">${events.length}</div><div class="label">Total Events</div></div>
+      <div class="stat-card"><div class="num">${upcoming.length}</div><div class="label">Upcoming Events</div></div>
+      <div class="stat-card"><div class="num">${presentToday}</div><div class="label">Present Today</div></div>
+    </div>
+    <div class="section-title">Upcoming Events</div>
+    ${upcoming.length? upcoming.slice(0,4).map(e=>eventCard(e,false)).join('') : emptyState('📅','No upcoming events yet.')}
+    `;
+  } else {
+    const my = volunteers.find(v=>v.id===currentUser.volunteerId);
+    const myAttendance = attendance.filter(a=>a.volunteerId===currentUser.volunteerId);
+    return `
+    <div class="welcome-card">
+      <h2>Hi, ${escapeHtml(currentUser.name||currentUser.username)} 👋</h2>
+      <p>Thanks for being part of the team.</p>
+    </div>
+    <div class="grid-stats">
+      <div class="stat-card"><div class="num">${upcoming.length}</div><div class="label">Upcoming Events</div></div>
+      <div class="stat-card"><div class="num">${myAttendance.filter(a=>a.status==='present').length}</div><div class="label">Times Attended</div></div>
+    </div>
+    ${my? `<div class="card"><h3>My Info</h3>
+      <div class="meta">📞 ${escapeHtml(my.phone||'-')}</div>
+      <div class="meta">✉️ ${escapeHtml(my.email||'-')}</div>
+      <div class="meta">🛠️ ${escapeHtml(my.skills||'-')}</div>
+    </div>`:''}
+    <div class="section-title">Upcoming Events</div>
+    ${upcoming.length? upcoming.slice(0,4).map(e=>eventCard(e,false)).join('') : emptyState('📅','No upcoming events yet.')}
+    `;
+  }
+}
+
+function emptyState(icon, text){
+  return `<div class="empty-state"><span class="ic">${icon}</span>${escapeHtml(text)}</div>`;
+}
+
+/* ============================= VOLUNTEERS ============================= */
+function renderVolunteers(){
+  let volunteers = getVolunteers();
+  if(volunteerSearch.trim()){
+    const q = volunteerSearch.trim().toLowerCase();
+    volunteers = volunteers.filter(v => (v.name||'').toLowerCase().includes(q) ||
+      (v.email||'').toLowerCase().includes(q) || (v.phone||'').toLowerCase().includes(q));
+  }
+  return `
+  <div class="toolbar">
+    <input type="text" id="volunteerSearchInput" placeholder="Search volunteers..." value="${escapeHtml(volunteerSearch)}">
+    <button class="btn" id="toggleAddVolunteer">${showAddVolunteerForm?'✕ Close':'➕ Add'}</button>
+  </div>
+  ${showAddVolunteerForm? addVolunteerForm() : ''}
+  <div class="section-title">Volunteers (${volunteers.length})</div>
+  ${volunteers.length? volunteers.map(volunteerCard).join('') : emptyState('👥','No volunteers found.')}
+  `;
+}
+
+function addVolunteerForm(){
+  return `
+  <form class="add-form" id="addVolunteerForm">
+    <h4>Add New Volunteer</h4>
+    <div class="field"><label>Full Name *</label><input type="text" id="v_name" required></div>
+    <div class="field"><label>Phone</label><input type="text" id="v_phone"></div>
+    <div class="field"><label>Email</label><input type="email" id="v_email"></div>
+    <div class="field"><label>Skills / Notes</label><input type="text" id="v_skills" placeholder="e.g. First aid, driving"></div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="v_createLogin"> <label for="v_createLogin">Create a login account for this volunteer</label>
+    </div>
+    <div id="v_loginFields" style="display:none;">
+      <div class="field"><label>Username</label><input type="text" id="v_username"></div>
+      <div class="field"><label>Password</label><input type="text" id="v_password"></div>
+    </div>
+    <div class="error-msg" id="v_error"></div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save Volunteer</button>
+    </div>
+  </form>`;
+}
+
+function volunteerCard(v){
+  const user = getUsers().find(u=>u.volunteerId===v.id);
+  return `
+  <div class="card">
+    <div class="row1">
+      <h3>${escapeHtml(v.name)}</h3>
+      <button class="icon-btn danger" data-action="delete-volunteer" data-id="${v.id}">🗑️</button>
+    </div>
+    <div class="meta">📞 ${escapeHtml(v.phone||'-')} &nbsp; ✉️ ${escapeHtml(v.email||'-')}</div>
+    ${v.skills? `<div class="meta">🛠️ ${escapeHtml(v.skills)}</div>`:''}
+    ${user? `<span class="badge badge-indigo">Login: ${escapeHtml(user.username)}</span>` : `<span class="badge badge-gray">No login account</span>`}
+  </div>`;
+}
+
+/* ============================= EVENTS ============================= */
+function renderEvents(){
+  const isAdmin = currentUser.role==='admin';
+  const events = [...getEvents()].sort((a,b)=>a.date.localeCompare(b.date));
+  return `
+  ${isAdmin? `
+  <div class="toolbar">
+    <div style="flex:1;"></div>
+    <button class="btn" id="toggleAddEvent" style="width:auto;">${showAddEventForm?'✕ Close':'➕ Add Event'}</button>
+  </div>
+  ${showAddEventForm? addEventForm() : ''}` : ''}
+  <div class="section-title">All Events (${events.length})</div>
+  ${events.length? events.map(e=>eventCard(e, isAdmin)).join('') : emptyState('📅','No events yet.')}
+  `;
+}
+
+function addEventForm(){
+  return `
+  <form class="add-form" id="addEventForm">
+    <h4>Add New Event</h4>
+    <div class="field"><label>Event Name *</label><input type="text" id="e_name" required></div>
+    <div class="field"><label>Date *</label><input type="date" id="e_date" required></div>
+    <div class="field"><label>Time</label><input type="time" id="e_time"></div>
+    <div class="field"><label>Location</label><input type="text" id="e_location"></div>
+    <div class="field"><label>Description</label><textarea id="e_desc" rows="2"></textarea></div>
+    <div class="error-msg" id="e_error"></div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save Event</button>
+    </div>
+  </form>`;
+}
+
+function eventCard(e, showDelete){
+  const isPast = e.date < todayStr();
+  return `
+  <div class="card">
+    <div class="row1">
+      <h3>${escapeHtml(e.name)}</h3>
+      ${showDelete? `<button class="icon-btn danger" data-action="delete-event" data-id="${e.id}">🗑️</button>`:''}
+    </div>
+    <div class="meta">📅 ${escapeHtml(e.date)} ${e.time? '· ⏰ '+escapeHtml(e.time):''}</div>
+    ${e.location? `<div class="meta">📍 ${escapeHtml(e.location)}</div>`:''}
+    ${e.description? `<div class="meta">${escapeHtml(e.description)}</div>`:''}
+    <span class="badge ${isPast?'badge-gray':'badge-green'}">${isPast?'Past':'Upcoming'}</span>
+  </div>`;
+}
+
+/* ============================= ATTENDANCE ============================= */
+function renderAttendance(){
+  const isAdmin = currentUser.role==='admin';
+  const events = [...getEvents()].sort((a,b)=>b.date.localeCompare(a.date));
+  if(!selectedEventId && events.length) selectedEventId = events[0].id;
+
+  if(isAdmin){
+    const volunteers = getVolunteers();
+    const attendance = getAttendance();
+    const rows = volunteers.map(v=>{
+      const rec = attendance.find(a=>a.eventId===selectedEventId && a.volunteerId===v.id);
+      const status = rec? rec.status : '';
+      return `
+      <div class="card">
+        <div class="row1"><h3 style="font-size:14px;">${escapeHtml(v.name)}</h3></div>
+        <div class="status-btns">
+          <button class="status-btn present ${status==='present'?'active':''}" data-action="mark-attendance" data-vid="${v.id}" data-status="present">✅ Present</button>
+          <button class="status-btn absent ${status==='absent'?'active':''}" data-action="mark-attendance" data-vid="${v.id}" data-status="absent">❌ Absent</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    return `
+    <div class="section-title">Take Attendance</div>
+    ${events.length? `
+    <div class="field">
+      <label>Select Event</label>
+      <select id="eventSelect">
+        ${events.map(e=>`<option value="${e.id}" ${e.id===selectedEventId?'selected':''}>${escapeHtml(e.name)} (${escapeHtml(e.date)})</option>`).join('')}
+      </select>
+    </div>
+    ${volunteers.length? rows : emptyState('👥','Add volunteers first to take attendance.')}
+    ` : emptyState('📅','Add an event first to take attendance.')}
+    `;
+  } else {
+    const myEvents = events.filter(e=>e.date<=todayStr()+'~' ); // placeholder not used
+    const attendance = getAttendance().filter(a=>a.volunteerId===currentUser.volunteerId);
+    const todaysEvents = getEvents().filter(e=>e.date===todayStr());
+    const historyRows = attendance
+      .sort((a,b)=> (b.time||'').localeCompare(a.time||''))
+      .map(a=>{
+        const ev = getEvents().find(e=>e.id===a.eventId);
+        return `<tr><td>${escapeHtml(ev? ev.name : 'Deleted event')}</td><td>${escapeHtml(ev? ev.date:'-')}</td>
+        <td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td></tr>`;
+      }).join('');
+
+    return `
+    <div class="section-title">Check In Today</div>
+    ${todaysEvents.length? todaysEvents.map(e=>{
+      const rec = getAttendance().find(a=>a.eventId===e.id && a.volunteerId===currentUser.volunteerId);
+      return `<div class="card">
+        <h3>${escapeHtml(e.name)}</h3>
+        <div class="meta">📍 ${escapeHtml(e.location||'-')}</div>
+        ${rec && rec.status==='present'
+          ? `<span class="badge badge-green">✅ Checked In</span>`
+          : `<button class="btn btn-sm" data-action="self-checkin" data-eid="${e.id}" style="margin-top:8px;">Check In</button>`}
+      </div>`;
+    }).join('') : emptyState('📅','No events scheduled for today.')}
+
+    <div class="section-title">My Attendance History</div>
+    ${attendance.length? `<div class="card"><table><thead><tr><th>Event</th><th>Date</th><th>Status</th></tr></thead>
+      <tbody>${historyRows}</tbody></table></div>` : emptyState('✅','No attendance records yet.')}
+    `;
+  }
+}
+
+/* ============================= EVENT BINDINGS ============================= */
+function bindPageEvents(){
+  const el = document.getElementById('pageContent');
+
+  // Volunteers page
+  const searchInput = document.getElementById('volunteerSearchInput');
+  if(searchInput){
+    searchInput.addEventListener('input', ()=>{ volunteerSearch = searchInput.value; renderPage(); });
+  }
+  const toggleAddVol = document.getElementById('toggleAddVolunteer');
+  if(toggleAddVol){
+    toggleAddVol.addEventListener('click', ()=>{ showAddVolunteerForm=!showAddVolunteerForm; renderPage(); });
+  }
+  const addVolForm = document.getElementById('addVolunteerForm');
+  if(addVolForm){
+    const createLoginCb = document.getElementById('v_createLogin');
+    createLoginCb.addEventListener('change', ()=>{
+      document.getElementById('v_loginFields').style.display = createLoginCb.checked? 'block':'none';
+    });
+    addVolForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      const name = document.getElementById('v_name').value.trim();
+      if(!name){ document.getElementById('v_error').textContent='Name is required.'; return; }
+      const newVolunteer = {
+        id: uid(), name,
+        phone: document.getElementById('v_phone').value.trim(),
+        email: document.getElementById('v_email').value.trim(),
+        skills: document.getElementById('v_skills').value.trim(),
+        joinDate: todayStr()
+      };
+      if(createLoginCb.checked){
+        const username = document.getElementById('v_username').value.trim();
+        const password = document.getElementById('v_password').value.trim();
+        if(!username || !password){ document.getElementById('v_error').textContent='Username and password required for login account.'; return; }
+        if(getUsers().some(u=>u.username.toLowerCase()===username.toLowerCase())){
+          document.getElementById('v_error').textContent='That username is already taken.'; return;
+        }
+        const users = getUsers();
+        users.push({id:uid(), username, password, role:'volunteer', name, volunteerId:newVolunteer.id});
+        setUsers(users);
+      }
+      const volunteers = getVolunteers();
+      volunteers.push(newVolunteer);
+      setVolunteers(volunteers);
+      showAddVolunteerForm=false;
+      renderPage();
+    });
+  }
+
+  // Events page
+  const toggleAddEvt = document.getElementById('toggleAddEvent');
+  if(toggleAddEvt){
+    toggleAddEvt.addEventListener('click', ()=>{ showAddEventForm=!showAddEventForm; renderPage(); });
+  }
+  const addEvtForm = document.getElementById('addEventForm');
+  if(addEvtForm){
+    addEvtForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      const name = document.getElementById('e_name').value.trim();
+      const date = document.getElementById('e_date').value;
+      if(!name || !date){ document.getElementById('e_error').textContent='Name and date are required.'; return; }
+      const events = getEvents();
+      events.push({
+        id: uid(), name, date,
+        time: document.getElementById('e_time').value,
+        location: document.getElementById('e_location').value.trim(),
+        description: document.getElementById('e_desc').value.trim()
+      });
+      setEvents(events);
+      showAddEventForm=false;
+      renderPage();
+    });
+  }
+
+  // Attendance page
+  const eventSelect = document.getElementById('eventSelect');
+  if(eventSelect){
+    eventSelect.addEventListener('change', ()=>{ selectedEventId = eventSelect.value; renderPage(); });
+  }
+
+  // Delegated actions (delete volunteer/event, mark attendance, self check-in)
+  el.addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action]');
+    if(!btn) return;
+    const action = btn.dataset.action;
+
+    if(action==='delete-volunteer'){
+      const id = btn.dataset.id;
+      if(!confirm('Delete this volunteer? This also removes their login and attendance records.')) return;
+      setVolunteers(getVolunteers().filter(v=>v.id!==id));
+      setUsers(getUsers().filter(u=>u.volunteerId!==id));
+      setAttendance(getAttendance().filter(a=>a.volunteerId!==id));
+      renderPage();
+    }
+    else if(action==='delete-event'){
+      const id = btn.dataset.id;
+      if(!confirm('Delete this event? This also removes its attendance records.')) return;
+      setEvents(getEvents().filter(ev=>ev.id!==id));
+      setAttendance(getAttendance().filter(a=>a.eventId!==id));
+      if(selectedEventId===id) selectedEventId=null;
+      renderPage();
+    }
+    else if(action==='mark-attendance'){
+      const vid = btn.dataset.vid, status = btn.dataset.status;
+      let attendance = getAttendance();
+      const idx = attendance.findIndex(a=>a.eventId===selectedEventId && a.volunteerId===vid);
+      const record = {id: idx>-1? attendance[idx].id : uid(), eventId:selectedEventId, volunteerId:vid, status, time:new Date().toISOString()};
+      if(idx>-1) attendance[idx]=record; else attendance.push(record);
+      setAttendance(attendance);
+      renderPage();
+    }
+    else if(action==='self-checkin'){
+      const eid = btn.dataset.eid;
+      let attendance = getAttendance();
+      const idx = attendance.findIndex(a=>a.eventId===eid && a.volunteerId===currentUser.volunteerId);
+      const record = {id: idx>-1? attendance[idx].id : uid(), eventId:eid, volunteerId:currentUser.volunteerId, status:'present', time:new Date().toISOString()};
+      if(idx>-1) attendance[idx]=record; else attendance.push(record);
+      setAttendance(attendance);
+      renderPage();
+    }
+  });
+}
+
+/* ============================= START ============================= */
+initApp();
+</script>
+</body>
+</html>
