@@ -105,6 +105,16 @@
   .announce-card .txt{flex:1; font-size:13px; color:#78350f; white-space:pre-wrap;}
   .hours-input{width:60px; padding:6px; border:1px solid var(--border); border-radius:8px; font-size:13px; text-align:center;}
   .hours-row{display:flex; align-items:center; gap:6px; margin-top:6px; font-size:12px; color:var(--muted);}
+  .chart-card{background:var(--card); border-radius:14px; padding:16px; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,.06);}
+  .chart-card h4{margin:0 0 14px; font-size:14px;}
+  .chart-bars{display:flex; align-items:flex-end; gap:6px; height:130px;}
+  .chart-bar-col{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; min-width:0;}
+  .chart-bar{width:100%; background:var(--primary); border-radius:6px 6px 0 0; min-height:3px;}
+  .chart-bar-value{font-size:10px; font-weight:700; color:var(--text); margin-bottom:3px;}
+  .chart-bar-label{font-size:9px; color:var(--muted); margin-top:5px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%;}
+  .top-vol-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);}
+  .top-vol-row:last-child{border-bottom:none;}
+  .top-vol-rank{width:22px; height:22px; border-radius:50%; background:#eef0ff; color:var(--primary); font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
 </style>
 </head>
 <body>
@@ -170,6 +180,7 @@ function totalContributionFor(volunteerId){
     .reduce(function(sum,a){ return sum + (Number(a.contribution)||0); }, 0);
 }
 const DAY_NAMES=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const EVENT_CATEGORIES=['Meeting','Outreach','Training','Fundraiser','Social','Other'];
 function eventIsDueToday(e){
   if(e.recurring==='weekly'){ return new Date().getDay() === Number(e.dayOfWeek); }
   return e.date === todayStr();
@@ -181,6 +192,62 @@ function currentSessionDate(e){
   const diff = (d.getDay() - target + 7) % 7;
   d.setDate(d.getDate() - diff);
   return d.toISOString().slice(0,10);
+}
+function weeklyStats(limit){
+  const map = {};
+  getAttendance().forEach(function(a){
+    const ev = getEvents().find(function(e){ return e.id===a.eventId; });
+    const d = a.sessionDate || (ev? ev.date : null);
+    if(!d) return;
+    if(!map[d]) map[d] = {present:0, contribution:0};
+    if(a.status==='present'){ map[d].present += 1; map[d].contribution += (Number(a.contribution)||0); }
+  });
+  const dates = Object.keys(map).sort();
+  const recent = dates.slice(-(limit||8));
+  return recent.map(function(d){ return {date:d, present:map[d].present, contribution:map[d].contribution}; });
+}
+function topVolunteers(limit){
+  const counts = {};
+  getAttendance().forEach(function(a){
+    if(a.status==='present'){ counts[a.volunteerId] = (counts[a.volunteerId]||0) + 1; }
+  });
+  return Object.keys(counts).map(function(vid){
+    const v = getVolunteers().find(function(vv){ return vv.id===vid; });
+    return {vid:vid, name: v? v.name : 'Unknown', count: counts[vid]};
+  }).sort(function(a,b){ return b.count - a.count; }).slice(0, limit||5);
+}
+function renderBarChart(items, valueKey, formatFn){
+  const max = Math.max.apply(null, items.map(function(it){ return it[valueKey]; }).concat([1]));
+  return `<div class="chart-bars">${items.map(function(it){
+    const pct = Math.max(4, Math.round((it[valueKey]/max)*100));
+    const short = (it.date||'').slice(5);
+    return `<div class="chart-bar-col">
+      <div class="chart-bar-value">${formatFn? formatFn(it[valueKey]) : it[valueKey]}</div>
+      <div class="chart-bar" style="height:${pct}%;"></div>
+      <div class="chart-bar-label">${escapeHtml(short)}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+function renderAnalytics(){
+  const weekly = weeklyStats(8);
+  const top = topVolunteers(5);
+  return `
+  <button class="back-link" data-action="back-to-dashboard">&larr; Back to Dashboard</button>
+  <div class="section-title">Attendance by Session</div>
+  <div class="chart-card">
+    ${weekly.length? renderBarChart(weekly, 'present') : emptyState('📊','No attendance data yet.')}
+  </div>
+  <div class="section-title">Contributions by Session</div>
+  <div class="chart-card">
+    ${weekly.length? renderBarChart(weekly, 'contribution', function(v){ return v; }) : emptyState('📊','No contribution data yet.')}
+  </div>
+  <div class="section-title">Most Active Volunteers</div>
+  <div class="chart-card">
+    ${top.length? top.map(function(t,i){
+      return `<div class="top-vol-row"><div class="top-vol-rank">${i+1}</div><div style="flex:1;">${escapeHtml(t.name)}</div><span class="badge badge-green">${t.count}x</span></div>`;
+    }).join('') : emptyState('🏆','No attendance data yet.')}
+  </div>
+  `;
 }
 function downloadCSV(filename, rows){
   const csv = rows.map(function(row){
@@ -608,6 +675,7 @@ function renderPage(){
   else if(currentPage==='events') el.innerHTML = renderEvents();
   else if(currentPage==='attendance') el.innerHTML = renderAttendance();
   else if(currentPage==='settings') el.innerHTML = renderSettings();
+  else if(currentPage==='analytics') el.innerHTML = renderAnalytics();
   bindPageEvents();
 }
 
@@ -637,8 +705,12 @@ function renderDashboard(){
       <div class="stat-card"><div class="num">${totalHoursAll}</div><div class="label">Total Hours Logged</div></div>
       <div class="stat-card"><div class="num">${totalContribAll}</div><div class="label">Total Contributions</div></div>
     </div>
+    <div class="card clickable" data-action="goto-analytics" style="margin-bottom:16px;">
+      <div class="row1"><h3>📊 View Full Analytics</h3><span class="icon-btn">&rarr;</span></div>
+      <div class="meta">Attendance trends, contributions, and your most active volunteers.</div>
+    </div>
     <div class="section-title">Upcoming Events</div>
-    ${upcoming.length? upcoming.slice(0,4).map(function(e){ return eventCard(e,false); }).join('') : emptyState('📅','No upcoming events yet.')}
+    ${upcoming.length? upcoming.slice(0,4).map(function(e){ return eventCard(e,true); }).join('') : emptyState('📅','No upcoming events yet.')}
     `;
   } else {
     const my = volunteers.find(function(v){ return v.id===currentUser.volunteerId; });
@@ -761,6 +833,7 @@ function renderProfilePage(v, isAdminViewing){
 }
 
 /* ============================= EVENTS ============================= */
+let eventCategoryFilter='';
 function renderEvents(){
   const isAdmin = currentUser.role==='admin';
   let events = getEvents().slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
@@ -768,10 +841,19 @@ function renderEvents(){
     const q = eventSearch.trim().toLowerCase();
     events = events.filter(function(e){ return (e.name||'').toLowerCase().includes(q) || (e.location||'').toLowerCase().includes(q); });
   }
+  if(eventCategoryFilter){
+    events = events.filter(function(e){ return (e.category||'Other')===eventCategoryFilter; });
+  }
   return `
   <div class="toolbar">
     <input type="text" id="eventSearchInput" placeholder="Search events..." value="${escapeHtml(eventSearch)}">
     ${isAdmin? `<button class="btn" id="toggleAddEvent" style="width:auto;">${showAddEventForm?'✕ Close':'➕ Add'}</button>` : ''}
+  </div>
+  <div class="field" style="margin-bottom:14px;">
+    <select id="eventCategoryFilterSelect">
+      <option value="">All Categories</option>
+      ${EVENT_CATEGORIES.map(function(c){ return `<option value="${c}" ${eventCategoryFilter===c?'selected':''}>${c}</option>`; }).join('')}
+    </select>
   </div>
   ${isAdmin && showAddEventForm? addEventForm() : ''}
   <div class="section-title">All Events (${events.length})</div>
@@ -783,6 +865,9 @@ function addEventForm(){
   <form class="add-form" id="addEventForm">
     <h4>Add New Event</h4>
     <div class="field"><label>Event Name *</label><input type="text" id="e_name" required placeholder="e.g. Sunday Meeting"></div>
+    <div class="field"><label>Category</label>
+      <select id="e_category">${EVENT_CATEGORIES.map(function(c){ return `<option value="${c}">${c}</option>`; }).join('')}</select>
+    </div>
     <div class="checkbox-row"><input type="checkbox" id="e_recurring"> <label for="e_recurring">Repeats weekly (e.g. every Sunday)</label></div>
     <div id="e_recurringFields" style="display:none;">
       <div class="field"><label>Day of the Week</label>
@@ -813,6 +898,7 @@ function eventCard(e, isAdmin){
     ${e.location? `<div class="meta">📍 ${escapeHtml(e.location)}</div>`:''}
     ${e.description? `<div class="meta">${escapeHtml(e.description)}</div>`:''}
     <span class="badge ${isRecurring?'badge-indigo':(isPast?'badge-gray':'badge-green')}">${isRecurring?'Weekly':(isPast?'Past':'Upcoming')}</span>
+    <span class="badge badge-gray">🏷️ ${escapeHtml(e.category||'Other')}</span>
     ${isAdmin? `<span class="badge badge-gray">${goingCount} going</span>` : ''}
     ${!isAdmin && !isPast ? (
       myRsvp
@@ -940,6 +1026,9 @@ function bindPageEvents(){
 
   const eventSearchInput = document.getElementById('eventSearchInput');
   if(eventSearchInput) eventSearchInput.addEventListener('input', function(){ eventSearch = eventSearchInput.value; renderPage(); });
+
+  const eventCategoryFilterSelect = document.getElementById('eventCategoryFilterSelect');
+  if(eventCategoryFilterSelect) eventCategoryFilterSelect.addEventListener('change', function(){ eventCategoryFilter = eventCategoryFilterSelect.value; renderPage(); });
 
   const toggleAddAdmin = document.getElementById('toggleAddAdmin');
   if(toggleAddAdmin) toggleAddAdmin.addEventListener('click', function(){ showAddAdminForm=!showAddAdminForm; renderPage(); });
@@ -1082,6 +1171,7 @@ function bindPageEvents(){
       if(!isRecurring && !date){ errEl.textContent='Date is required.'; return; }
       const eventData = {
         name: name,
+        category: document.getElementById('e_category').value,
         time: document.getElementById('e_time').value,
         location: document.getElementById('e_location').value.trim(),
         description: document.getElementById('e_desc').value.trim()
@@ -1180,6 +1270,8 @@ function bindPageEvents(){
 
     if(action==='view-volunteer'){ selectedVolunteerId = btn.dataset.id; currentPage='volunteer-detail'; renderPage(); }
     else if(action==='goto-profile'){ currentPage='profile'; render(); }
+    else if(action==='goto-analytics'){ currentPage='analytics'; renderPage(); }
+    else if(action==='back-to-dashboard'){ currentPage='dashboard'; renderPage(); }
     else if(action==='back-to-volunteers'){ currentPage='volunteers'; renderPage(); }
     else if(action==='delete-volunteer'){
       const id = btn.dataset.id;
