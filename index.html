@@ -165,6 +165,23 @@ function totalHoursFor(volunteerId){
   return getAttendance().filter(function(a){ return a.volunteerId===volunteerId && a.status==='present'; })
     .reduce(function(sum,a){ return sum + (Number(a.hours)||0); }, 0);
 }
+function totalContributionFor(volunteerId){
+  return getAttendance().filter(function(a){ return a.volunteerId===volunteerId && a.status==='present'; })
+    .reduce(function(sum,a){ return sum + (Number(a.contribution)||0); }, 0);
+}
+const DAY_NAMES=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+function eventIsDueToday(e){
+  if(e.recurring==='weekly'){ return new Date().getDay() === Number(e.dayOfWeek); }
+  return e.date === todayStr();
+}
+function currentSessionDate(e){
+  if(e.recurring!=='weekly') return e.date;
+  const target = Number(e.dayOfWeek);
+  const d = new Date();
+  const diff = (d.getDay() - target + 7) % 7;
+  d.setDate(d.getDate() - diff);
+  return d.toISOString().slice(0,10);
+}
 function downloadCSV(filename, rows){
   const csv = rows.map(function(row){
     return row.map(function(cell){
@@ -214,6 +231,7 @@ let showAddVolunteerForm=false;
 let showAddEventForm=false;
 let volunteerSearch='';
 let selectedEventId=null;
+let attendanceSessionDate=null;
 let selectedVolunteerId=null;
 let loginError='';
 let setupError='';
@@ -402,6 +420,8 @@ function bindSetupEvents(){
 }
 
 /* ============================= LOGIN ============================= */
+let showForgotPassword=false;
+let resetMessage='';
 function renderLogin(){
   const s = getSettings();
   return `
@@ -410,20 +430,55 @@ function renderLogin(){
       ${s.logoData? `<div class="login-logo"><img src="${s.logoData}"></div>` : ''}
       <h1>${s.logoData? '' : '🤝 '}${escapeHtml(s.portalName)}</h1>
       <p class="sub">Sign in to continue</p>
+      ${showForgotPassword? `
+      <form id="resetForm">
+        <div class="field"><label>Your account email</label><input type="email" id="resetEmail" required></div>
+        <div class="error-msg">${escapeHtml(loginError)}</div>
+        <div class="success-msg">${escapeHtml(resetMessage)}</div>
+        <button type="submit" class="btn">Send Reset Link</button>
+        <button type="button" class="btn btn-secondary" id="backToLoginBtn" style="margin-top:8px;">&larr; Back to Login</button>
+      </form>
+      ` : `
       <form id="loginForm">
         <div class="field"><label>Email</label><input type="email" id="loginEmail" autocomplete="username" required></div>
         <div class="field"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password" required></div>
         <div class="error-msg">${escapeHtml(loginError)}</div>
         <button type="submit" class="btn">Log In</button>
+        <button type="button" class="back-link" id="forgotPasswordBtn" style="display:block; margin:10px auto 0;">Forgot password?</button>
       </form>
+      `}
     </div>
   </div>`;
 }
 function bindLoginEvents(){
-  document.getElementById('loginForm').addEventListener('submit', function(e){
-    e.preventDefault();
-    doLogin(document.getElementById('loginEmail').value, document.getElementById('loginPassword').value);
-  });
+  const loginForm = document.getElementById('loginForm');
+  if(loginForm){
+    loginForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      doLogin(document.getElementById('loginEmail').value, document.getElementById('loginPassword').value);
+    });
+    document.getElementById('forgotPasswordBtn').addEventListener('click', function(){
+      showForgotPassword=true; loginError=''; resetMessage=''; render();
+    });
+  }
+  const resetForm = document.getElementById('resetForm');
+  if(resetForm){
+    resetForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      loginError=''; resetMessage='';
+      const email = document.getElementById('resetEmail').value.trim();
+      auth.sendPasswordResetEmail(email).then(function(){
+        resetMessage='Reset link sent! Check that email inbox.';
+        render();
+      }).catch(function(err){
+        loginError = friendlyAuthError(err);
+        render();
+      });
+    });
+    document.getElementById('backToLoginBtn').addEventListener('click', function(){
+      showForgotPassword=false; loginError=''; resetMessage=''; render();
+    });
+  }
 }
 
 /* ============================= APP SHELL ============================= */
@@ -489,6 +544,7 @@ function renderDashboard(){
   if(isAdmin){
     const presentToday = attendance.filter(function(a){ return a.time && a.time.slice(0,10)===todayStr() && a.status==='present'; }).length;
     const totalHoursAll = attendance.filter(function(a){ return a.status==='present'; }).reduce(function(s,a){ return s+(Number(a.hours)||0); },0);
+    const totalContribAll = attendance.filter(function(a){ return a.status==='present'; }).reduce(function(s,a){ return s+(Number(a.contribution)||0); },0);
     return `
     <div class="welcome-card"><h2>Welcome back 👋</h2><p>Here's what's happening with your volunteer program.</p></div>
     ${announceHtml}
@@ -498,6 +554,7 @@ function renderDashboard(){
       <div class="stat-card"><div class="num">${upcoming.length}</div><div class="label">Upcoming Events</div></div>
       <div class="stat-card"><div class="num">${presentToday}</div><div class="label">Present Today</div></div>
       <div class="stat-card"><div class="num">${totalHoursAll}</div><div class="label">Total Hours Logged</div></div>
+      <div class="stat-card"><div class="num">${totalContribAll}</div><div class="label">Total Contributions</div></div>
     </div>
     <div class="section-title">Upcoming Events</div>
     ${upcoming.length? upcoming.slice(0,4).map(function(e){ return eventCard(e,false); }).join('') : emptyState('📅','No upcoming events yet.')}
@@ -506,6 +563,7 @@ function renderDashboard(){
     const my = volunteers.find(function(v){ return v.id===currentUser.volunteerId; });
     const myAttendance = attendance.filter(function(a){ return a.volunteerId===currentUser.volunteerId; });
     const myHours = totalHoursFor(currentUser.volunteerId);
+    const myContrib = totalContributionFor(currentUser.volunteerId);
     return `
     <div class="welcome-card"><h2>Hi, ${escapeHtml(currentUser.name||currentUser.email)} 👋</h2><p>Thanks for being part of the team.</p></div>
     ${announceHtml}
@@ -513,6 +571,7 @@ function renderDashboard(){
       <div class="stat-card"><div class="num">${upcoming.length}</div><div class="label">Upcoming Events</div></div>
       <div class="stat-card"><div class="num">${myAttendance.filter(function(a){ return a.status==='present'; }).length}</div><div class="label">Times Attended</div></div>
       <div class="stat-card"><div class="num">${myHours}</div><div class="label">Total Hours</div></div>
+      <div class="stat-card"><div class="num">${myContrib}</div><div class="label">Total Contributed</div></div>
     </div>
     ${my? `<div class="card clickable" data-action="goto-profile">
       <div class="card-with-avatar">
@@ -574,6 +633,7 @@ function volunteerCard(v){
         <div class="meta">📞 ${escapeHtml(v.phone||'-')} &nbsp; ✉️ ${escapeHtml(v.email||'-')}</div>
         ${user? `<span class="badge badge-indigo">Login: ${escapeHtml(user.email)}</span>` : `<span class="badge badge-gray">No login account</span>`}
         <span class="badge badge-green">${totalHoursFor(v.id)} hrs logged</span>
+        <span class="badge badge-indigo">${escapeHtml(String(totalContributionFor(v.id)))} contributed</span>
       </div>
     </div>
   </div>`;
@@ -589,7 +649,8 @@ function renderProfilePage(v, isAdminViewing){
   const events = getEvents();
   const historyRows = attendance.map(function(a){
     const ev = events.find(function(e){ return e.id===a.eventId; });
-    return `<tr><td>${escapeHtml(ev?ev.name:'Deleted event')}</td><td>${escapeHtml(ev?ev.date:'-')}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.status==='present'?(Number(a.hours)||0):'-'}</td></tr>`;
+    const displayDate = a.sessionDate || (ev?ev.date:'-');
+    return `<tr><td>${escapeHtml(ev?ev.name:'Deleted event')}</td><td>${escapeHtml(displayDate)}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.status==='present'?(Number(a.hours)||0):'-'}</td><td>${a.status==='present'?(Number(a.contribution)||0):'-'}</td></tr>`;
   }).join('');
 
   return `
@@ -612,8 +673,8 @@ function renderProfilePage(v, isAdminViewing){
     <div class="form-actions"><button type="submit" class="btn">💾 Save Changes</button></div>
   </form>
   ${isAdminViewing? `<button class="btn btn-danger" style="margin-top:10px;" data-action="delete-volunteer" data-id="${v.id}">🗑️ Delete Volunteer</button>`:''}
-  <div class="section-title">Attendance History<span style="font-size:12px; font-weight:600; color:var(--muted);">${totalHoursFor(v.id)} hrs total</span></div>
-  ${attendance.length? `<div class="card"><table><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Hrs</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : emptyState('✅','No attendance records yet.')}
+  <div class="section-title">Attendance History<span style="font-size:12px; font-weight:600; color:var(--muted);">${totalHoursFor(v.id)} hrs &middot; ${totalContributionFor(v.id)} contributed</span></div>
+  ${attendance.length? `<div class="card"><table><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Hrs</th><th>Paid</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : emptyState('✅','No attendance records yet.')}
   `;
 }
 
@@ -631,8 +692,14 @@ function addEventForm(){
   return `
   <form class="add-form" id="addEventForm">
     <h4>Add New Event</h4>
-    <div class="field"><label>Event Name *</label><input type="text" id="e_name" required></div>
-    <div class="field"><label>Date *</label><input type="date" id="e_date" required></div>
+    <div class="field"><label>Event Name *</label><input type="text" id="e_name" required placeholder="e.g. Sunday Meeting"></div>
+    <div class="checkbox-row"><input type="checkbox" id="e_recurring"> <label for="e_recurring">Repeats weekly (e.g. every Sunday)</label></div>
+    <div id="e_recurringFields" style="display:none;">
+      <div class="field"><label>Day of the Week</label>
+        <select id="e_dayOfWeek">${DAY_NAMES.map(function(d,i){ return `<option value="${i}" ${i===0?'selected':''}>${d}</option>`; }).join('')}</select>
+      </div>
+    </div>
+    <div id="e_dateField" class="field"><label>Date *</label><input type="date" id="e_date" required></div>
     <div class="field"><label>Time</label><input type="time" id="e_time"></div>
     <div class="field"><label>Location</label><input type="text" id="e_location"></div>
     <div class="field"><label>Description</label><textarea id="e_desc" rows="2"></textarea></div>
@@ -641,30 +708,39 @@ function addEventForm(){
   </form>`;
 }
 function eventCard(e, showDelete){
-  const isPast = e.date < todayStr();
+  const isPast = !e.recurring && e.date < todayStr();
+  const isRecurring = e.recurring==='weekly';
   return `
   <div class="card">
     <div class="row1"><h3>${escapeHtml(e.name)}</h3>${showDelete? `<button class="icon-btn danger" data-action="delete-event" data-id="${e.id}">🗑️</button>`:''}</div>
-    <div class="meta">📅 ${escapeHtml(e.date)} ${e.time? '· ⏰ '+escapeHtml(e.time):''}</div>
+    ${isRecurring
+      ? `<div class="meta">🔁 Every ${DAY_NAMES[Number(e.dayOfWeek)]} ${e.time? '· ⏰ '+escapeHtml(e.time):''}</div>`
+      : `<div class="meta">📅 ${escapeHtml(e.date)} ${e.time? '· ⏰ '+escapeHtml(e.time):''}</div>`}
     ${e.location? `<div class="meta">📍 ${escapeHtml(e.location)}</div>`:''}
     ${e.description? `<div class="meta">${escapeHtml(e.description)}</div>`:''}
-    <span class="badge ${isPast?'badge-gray':'badge-green'}">${isPast?'Past':'Upcoming'}</span>
+    <span class="badge ${isRecurring?'badge-indigo':(isPast?'badge-gray':'badge-green')}">${isRecurring?'Weekly':(isPast?'Past':'Upcoming')}</span>
   </div>`;
 }
 
 /* ============================= ATTENDANCE ============================= */
 function renderAttendance(){
   const isAdmin = currentUser.role==='admin';
-  const events = getEvents().slice().sort(function(a,b){ return b.date.localeCompare(a.date); });
+  const events = getEvents().slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
   if(!selectedEventId && events.length) selectedEventId = events[0].id;
+  const selectedEvent = events.find(function(e){ return e.id===selectedEventId; });
 
   if(isAdmin){
     const volunteers = getVolunteers();
     const attendance = getAttendance();
+    const isRecurring = selectedEvent && selectedEvent.recurring==='weekly';
+    if(isRecurring && !attendanceSessionDate) attendanceSessionDate = currentSessionDate(selectedEvent);
+    const sessionDate = isRecurring ? attendanceSessionDate : (selectedEvent? selectedEvent.date : null);
+
     const rows = volunteers.map(function(v){
-      const rec = attendance.find(function(a){ return a.eventId===selectedEventId && a.volunteerId===v.id; });
+      const rec = attendance.find(function(a){ return a.eventId===selectedEventId && a.volunteerId===v.id && (a.sessionDate||selectedEvent.date)===sessionDate; });
       const status = rec? rec.status : '';
       const hrs = rec && rec.hours!=null ? rec.hours : 2;
+      const contrib = rec && rec.contribution!=null ? rec.contribution : 0;
       return `
       <div class="card"><div class="card-with-avatar">
         ${v.photo? `<img class="avatar avatar-sm" src="${v.photo}">` : `<div class="avatar avatar-sm">${initials(v.name)}</div>`}
@@ -673,7 +749,10 @@ function renderAttendance(){
             <button class="status-btn present ${status==='present'?'active':''}" data-action="mark-attendance" data-vid="${v.id}" data-status="present">✅ Present</button>
             <button class="status-btn absent ${status==='absent'?'active':''}" data-action="mark-attendance" data-vid="${v.id}" data-status="absent">❌ Absent</button>
           </div>
-          ${status==='present'? `<div class="hours-row">Hours: <input type="number" min="0" step="0.5" class="hours-input" data-action="set-hours" data-vid="${v.id}" value="${hrs}"></div>` : ''}
+          ${status==='present'? `
+          <div class="hours-row">Hours: <input type="number" min="0" step="0.5" class="hours-input" data-action="set-hours" data-vid="${v.id}" value="${hrs}"></div>
+          <div class="hours-row">Contribution: <input type="number" min="0" step="0.01" class="hours-input" data-action="set-contribution" data-vid="${v.id}" value="${contrib}"></div>
+          ` : ''}
         </div>
       </div></div>`;
     }).join('');
@@ -681,28 +760,31 @@ function renderAttendance(){
     <div class="section-title">Take Attendance<button class="btn btn-sm btn-secondary" id="exportAttendanceCsv">⬇️ Export CSV</button></div>
     ${events.length? `
     <div class="field"><label>Select Event</label>
-      <select id="eventSelect">${events.map(function(e){ return `<option value="${e.id}" ${e.id===selectedEventId?'selected':''}>${escapeHtml(e.name)} (${escapeHtml(e.date)})</option>`; }).join('')}</select>
+      <select id="eventSelect">${events.map(function(e){ return `<option value="${e.id}" ${e.id===selectedEventId?'selected':''}>${escapeHtml(e.name)} ${e.recurring==='weekly'?'(Weekly - '+DAY_NAMES[Number(e.dayOfWeek)]+')':'('+escapeHtml(e.date)+')'}</option>`; }).join('')}</select>
     </div>
+    ${isRecurring? `<div class="field"><label>Session Date (this week's meeting)</label><input type="date" id="sessionDateInput" value="${sessionDate}"></div>` : ''}
     ${volunteers.length? rows : emptyState('👥','Add volunteers first to take attendance.')}
     ` : emptyState('📅','Add an event first to take attendance.')}
     `;
   } else {
     const attendance = getAttendance();
-    const todaysEvents = getEvents().filter(function(e){ return e.date===todayStr(); });
+    const dueEvents = getEvents().filter(function(e){ return eventIsDueToday(e); });
     const historyRows = attendance.slice().sort(function(a,b){ return (b.time||'').localeCompare(a.time||''); }).map(function(a){
       const ev = getEvents().find(function(e){ return e.id===a.eventId; });
-      return `<tr><td>${escapeHtml(ev? ev.name : 'Deleted event')}</td><td>${escapeHtml(ev? ev.date:'-')}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.status==='present'?(Number(a.hours)||0):'-'}</td></tr>`;
+      const displayDate = a.sessionDate || (ev?ev.date:'-');
+      return `<tr><td>${escapeHtml(ev? ev.name : 'Deleted event')}</td><td>${escapeHtml(displayDate)}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.status==='present'?(Number(a.hours)||0):'-'}</td><td>${a.status==='present'?(Number(a.contribution)||0):'-'}</td></tr>`;
     }).join('');
     return `
     <div class="section-title">Check In Today</div>
-    ${todaysEvents.length? todaysEvents.map(function(e){
-      const rec = attendance.find(function(a){ return a.eventId===e.id && a.volunteerId===currentUser.volunteerId; });
+    ${dueEvents.length? dueEvents.map(function(e){
+      const sd = currentSessionDate(e);
+      const rec = attendance.find(function(a){ return a.eventId===e.id && a.volunteerId===currentUser.volunteerId && (a.sessionDate||e.date)===sd; });
       return `<div class="card"><h3>${escapeHtml(e.name)}</h3><div class="meta">📍 ${escapeHtml(e.location||'-')}</div>
         ${rec && rec.status==='present' ? `<span class="badge badge-green">✅ Checked In</span>` : `<button class="btn btn-sm" data-action="self-checkin" data-eid="${e.id}" style="margin-top:8px;">Check In</button>`}
       </div>`;
     }).join('') : emptyState('📅','No events scheduled for today.')}
-    <div class="section-title">My Attendance History<span style="font-size:12px; font-weight:600; color:var(--muted);">${totalHoursFor(currentUser.volunteerId)} hrs total</span></div>
-    ${attendance.length? `<div class="card"><table><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Hrs</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : emptyState('✅','No attendance records yet.')}
+    <div class="section-title">My Attendance History<span style="font-size:12px; font-weight:600; color:var(--muted);">${totalHoursFor(currentUser.volunteerId)} hrs &middot; ${totalContributionFor(currentUser.volunteerId)} paid</span></div>
+    ${attendance.length? `<div class="card"><table><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Hrs</th><th>Paid</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : emptyState('✅','No attendance records yet.')}
     `;
   }
 }
@@ -836,27 +918,46 @@ function bindPageEvents(){
   const toggleAddEvt = document.getElementById('toggleAddEvent');
   if(toggleAddEvt) toggleAddEvt.addEventListener('click', function(){ showAddEventForm=!showAddEventForm; renderPage(); });
 
+  const recurringCb = document.getElementById('e_recurring');
+  if(recurringCb){
+    recurringCb.addEventListener('change', function(){
+      document.getElementById('e_recurringFields').style.display = recurringCb.checked? 'block':'none';
+      document.getElementById('e_dateField').style.display = recurringCb.checked? 'none':'block';
+      document.getElementById('e_date').required = !recurringCb.checked;
+    });
+  }
+
   const addEvtForm = document.getElementById('addEventForm');
   if(addEvtForm){
     addEvtForm.addEventListener('submit', function(e){
       e.preventDefault();
       const name = document.getElementById('e_name').value.trim();
+      const isRecurring = document.getElementById('e_recurring').checked;
       const date = document.getElementById('e_date').value;
       const errEl = document.getElementById('e_error');
-      if(!name || !date){ errEl.textContent='Name and date are required.'; return; }
-      db.collection('events').add({
-        name: name, date: date,
+      if(!name){ errEl.textContent='Name is required.'; return; }
+      if(!isRecurring && !date){ errEl.textContent='Date is required.'; return; }
+      const eventData = {
+        name: name,
         time: document.getElementById('e_time').value,
         location: document.getElementById('e_location').value.trim(),
         description: document.getElementById('e_desc').value.trim()
-      }).then(function(){
+      };
+      if(isRecurring){
+        eventData.recurring = 'weekly';
+        eventData.dayOfWeek = parseInt(document.getElementById('e_dayOfWeek').value, 10);
+        eventData.date = todayStr();
+      } else {
+        eventData.date = date;
+      }
+      db.collection('events').add(eventData).then(function(){
         showAddEventForm=false; renderPage();
       }).catch(function(err){ errEl.textContent = err.message; });
     });
   }
 
   const eventSelect = document.getElementById('eventSelect');
-  if(eventSelect) eventSelect.addEventListener('change', function(){ selectedEventId = eventSelect.value; renderPage(); });
+  if(eventSelect) eventSelect.addEventListener('change', function(){ selectedEventId = eventSelect.value; attendanceSessionDate=null; renderPage(); });
 
   const logoUpload = document.getElementById('logoUpload');
   if(logoUpload){
@@ -890,9 +991,9 @@ function bindPageEvents(){
   const exportVolunteersBtn = document.getElementById('exportVolunteersCsv');
   if(exportVolunteersBtn){
     exportVolunteersBtn.addEventListener('click', function(){
-      const rows = [['Name','Phone','Email','Skills','Joined','Total Hours']];
+      const rows = [['Name','Phone','Email','Skills','Joined','Total Hours','Total Contribution']];
       getVolunteers().forEach(function(v){
-        rows.push([v.name, v.phone||'', v.email||'', v.skills||'', v.joinDate||'', totalHoursFor(v.id)]);
+        rows.push([v.name, v.phone||'', v.email||'', v.skills||'', v.joinDate||'', totalHoursFor(v.id), totalContributionFor(v.id)]);
       });
       downloadCSV('volunteers.csv', rows);
     });
@@ -901,21 +1002,33 @@ function bindPageEvents(){
   if(exportAttendanceBtn){
     exportAttendanceBtn.addEventListener('click', function(){
       const ev = getEvents().find(function(e){ return e.id===selectedEventId; });
-      const rows = [['Volunteer','Status','Hours','Event','Date']];
+      const rows = [['Volunteer','Status','Hours','Contribution','Event','Session Date']];
       getAttendance().filter(function(a){ return a.eventId===selectedEventId; }).forEach(function(a){
         const v = getVolunteers().find(function(vv){ return vv.id===a.volunteerId; });
-        rows.push([v?v.name:'Unknown', a.status, a.status==='present'?(a.hours||0):'', ev?ev.name:'', ev?ev.date:'']);
+        rows.push([v?v.name:'Unknown', a.status, a.status==='present'?(a.hours||0):'', a.status==='present'?(a.contribution||0):'', ev?ev.name:'', a.sessionDate||(ev?ev.date:'')]);
       });
-      downloadCSV('attendance-'+(ev?ev.date:'export')+'.csv', rows);
+      downloadCSV('attendance-'+(ev?(ev.recurring==='weekly'?attendanceSessionDate:ev.date):'export')+'.csv', rows);
     });
   }
   document.querySelectorAll('[data-action="set-hours"]').forEach(function(inp){
     inp.addEventListener('change', function(){
-      const vid = inp.dataset.vid;
       const hrs = parseFloat(inp.value)||0;
-      upsertAttendance(selectedEventId, vid, 'present', hrs);
+      upsertAttendance(selectedEventId, inp.dataset.vid, 'present', attendanceSessionDate, hrs);
     });
   });
+  document.querySelectorAll('[data-action="set-contribution"]').forEach(function(inp){
+    inp.addEventListener('change', function(){
+      const amt = parseFloat(inp.value)||0;
+      upsertAttendance(selectedEventId, inp.dataset.vid, 'present', attendanceSessionDate, null, amt);
+    });
+  });
+  const sessionDateInput = document.getElementById('sessionDateInput');
+  if(sessionDateInput){
+    sessionDateInput.addEventListener('change', function(){
+      attendanceSessionDate = sessionDateInput.value;
+      renderPage();
+    });
+  }
 
   el.addEventListener('click', function(e){
     const btn = e.target.closest('[data-action]');
@@ -950,8 +1063,11 @@ function bindPageEvents(){
         })
       ]).then(function(){ if(selectedEventId===id) selectedEventId=null; renderPage(); });
     }
-    else if(action==='mark-attendance'){ upsertAttendance(selectedEventId, btn.dataset.vid, btn.dataset.status); }
-    else if(action==='self-checkin'){ upsertAttendance(btn.dataset.eid, currentUser.volunteerId, 'present'); }
+    else if(action==='mark-attendance'){ upsertAttendance(selectedEventId, btn.dataset.vid, btn.dataset.status, attendanceSessionDate); }
+    else if(action==='self-checkin'){
+      const ev = getEvents().find(function(e){ return e.id===btn.dataset.eid; });
+      upsertAttendance(btn.dataset.eid, currentUser.volunteerId, 'present', ev? currentSessionDate(ev) : todayStr());
+    }
     else if(action==='choose-theme'){
       const preset = THEME_PRESETS.find(function(t){ return t.name===btn.dataset.name; });
       if(preset) db.collection('settings').doc('app').set({theme:preset}, {merge:true});
@@ -960,12 +1076,17 @@ function bindPageEvents(){
   });
 }
 
-function upsertAttendance(eventId, volunteerId, status, hours){
-  const existing = getAttendance().find(function(a){ return a.eventId===eventId && a.volunteerId===volunteerId; });
-  const data = {eventId:eventId, volunteerId:volunteerId, status:status, time:new Date().toISOString()};
+function upsertAttendance(eventId, volunteerId, status, sessionDate, hours, contribution){
+  const ev = getEvents().find(function(e){ return e.id===eventId; });
+  const sd = sessionDate || (ev? currentSessionDate(ev) : todayStr());
+  const existing = getAttendance().find(function(a){ return a.eventId===eventId && a.volunteerId===volunteerId && (a.sessionDate||(ev?ev.date:sd))===sd; });
+  const data = {eventId:eventId, volunteerId:volunteerId, status:status, sessionDate:sd, time:new Date().toISOString()};
   if(hours!=null) data.hours = hours;
   else if(existing && existing.hours!=null) data.hours = existing.hours;
   else if(status==='present') data.hours = 2;
+  if(contribution!=null) data.contribution = contribution;
+  else if(existing && existing.contribution!=null) data.contribution = existing.contribution;
+  else if(status==='present') data.contribution = 0;
   if(existing){ db.collection('attendance').doc(existing.id).update(data); }
   else { db.collection('attendance').add(data); }
 }
