@@ -215,7 +215,7 @@ function resizeImageFile(file, maxDim, quality, callback){
 }
 
 /* ============================= CACHES (live from Firestore) ============================= */
-let volunteersCache=[], eventsCache=[], attendanceCache=[], usersCache=[];
+let volunteersCache=[], eventsCache=[], attendanceCache=[], usersCache=[], rsvpsCache=[];
 let settingsCache={ adminCreated:false, logoData:null, portalName:'Volunteer Portal', theme:THEME_PRESETS[0], announcement:'' };
 let settingsLoaded=false;
 function getVolunteers(){ return volunteersCache; }
@@ -223,6 +223,7 @@ function getEvents(){ return eventsCache; }
 function getAttendance(){ return attendanceCache; }
 function getUsers(){ return usersCache; }
 function getSettings(){ return settingsCache; }
+function getRsvps(){ return rsvpsCache; }
 
 /* ============================= APP STATE ============================= */
 let currentUser=null;
@@ -230,16 +231,20 @@ let currentPage='dashboard';
 let showAddVolunteerForm=false;
 let showAddEventForm=false;
 let volunteerSearch='';
+let eventSearch='';
 let selectedEventId=null;
 let attendanceSessionDate=null;
 let selectedVolunteerId=null;
 let loginError='';
 let setupError='';
+let signupError='';
 let pendingPhotoData=null;
 let settingUpInProgress=false;
+let selfSignupInProgress=false;
+let showAddAdminForm=false;
 
 /* ============================= FIRESTORE LISTENERS ============================= */
-let unsubSettings=null, unsubVolunteers=null, unsubEvents=null, unsubAttendance=null, unsubUsers=null;
+let unsubSettings=null, unsubVolunteers=null, unsubEvents=null, unsubAttendance=null, unsubUsers=null, unsubRsvps=null;
 
 function startPublicListeners(){
   unsubSettings = db.collection('settings').doc('app').onSnapshot(function(doc){
@@ -280,11 +285,15 @@ function startPrivateListeners(){
     eventsCache = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
     renderPage();
   });
+  unsubRsvps = db.collection('rsvps').onSnapshot(function(snap){
+    rsvpsCache = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+    renderPage();
+  });
 }
 function stopPrivateListeners(){
-  [unsubVolunteers,unsubEvents,unsubAttendance,unsubUsers].forEach(function(u){ if(u) u(); });
-  unsubVolunteers=unsubEvents=unsubAttendance=unsubUsers=null;
-  volunteersCache=[]; eventsCache=[]; attendanceCache=[]; usersCache=[];
+  [unsubVolunteers,unsubEvents,unsubAttendance,unsubUsers,unsubRsvps].forEach(function(u){ if(u) u(); });
+  unsubVolunteers=unsubEvents=unsubAttendance=unsubUsers=unsubRsvps=null;
+  volunteersCache=[]; eventsCache=[]; attendanceCache=[]; usersCache=[]; rsvpsCache=[];
 }
 
 function applyTheme(){
@@ -297,7 +306,7 @@ function applyTheme(){
 /* ============================= AUTH ============================= */
 auth.onAuthStateChanged(async function(fbUser){
   if(fbUser){
-    if(settingUpInProgress) return; // doSetup() manages currentUser itself
+    if(settingUpInProgress || selfSignupInProgress) return; // doSetup()/doSignup() manage currentUser themselves
     try{
       const doc = await db.collection('users').doc(fbUser.uid).get();
       if(!doc.exists){
@@ -373,6 +382,46 @@ function createVolunteerLogin(name, email, password, volunteerId){
     .then(function(){ return secondaryApp.delete(); });
 }
 
+function doSignup(name, email, password, phone){
+  signupError='';
+  if(!name.trim()){ signupError='Name is required.'; render(); return; }
+  if(password.length < 6){ signupError='Password must be at least 6 characters.'; render(); return; }
+  selfSignupInProgress = true;
+  auth.createUserWithEmailAndPassword(email.trim(), password).then(function(cred){
+    return db.collection('volunteers').add({name:name.trim(), phone:(phone||'').trim(), email:email.trim(), skills:'', photo:'', joinDate:todayStr()})
+      .then(function(volRef){
+        const profile = {role:'volunteer', name:name.trim(), email:email.trim(), volunteerId:volRef.id};
+        return db.collection('users').doc(cred.user.uid).set(profile).then(function(){
+          currentUser = Object.assign({uid:cred.user.uid, email:email.trim()}, profile);
+          selfSignupInProgress=false;
+          startPrivateListeners();
+          currentPage='dashboard';
+          render();
+        });
+      });
+  }).catch(function(err){
+    selfSignupInProgress=false;
+    signupError = friendlyAuthError(err);
+    render();
+  });
+}
+
+function createAdminLogin(name, email, password){
+  const secondaryApp = firebase.initializeApp(firebaseConfig, 'Secondary'+Date.now());
+  let newUid=null;
+  return secondaryApp.auth().createUserWithEmailAndPassword(email.trim(), password)
+    .then(function(cred){
+      newUid = cred.user.uid;
+      return db.collection('users').doc(cred.user.uid).set({role:'volunteer', name:name, email:email.trim()});
+    })
+    .then(function(){ return secondaryApp.auth().signOut(); })
+    .then(function(){ return secondaryApp.delete(); })
+    .then(function(){ return db.collection('users').doc(newUid).update({role:'admin'}); });
+}
+function promoteToAdmin(uid){
+  return db.collection('users').doc(uid).update({role:'admin'});
+}
+
 /* ============================= RENDER ROOT ============================= */
 function render(){
   const app = document.getElementById('app');
@@ -420,7 +469,7 @@ function bindSetupEvents(){
 }
 
 /* ============================= LOGIN ============================= */
-let showForgotPassword=false;
+let loginView='login'; // 'login' | 'forgot' | 'signup'
 let resetMessage='';
 function renderLogin(){
   const s = getSettings();
@@ -429,14 +478,25 @@ function renderLogin(){
     <div class="login-card">
       ${s.logoData? `<div class="login-logo"><img src="${s.logoData}"></div>` : ''}
       <h1>${s.logoData? '' : '🤝 '}${escapeHtml(s.portalName)}</h1>
-      <p class="sub">Sign in to continue</p>
-      ${showForgotPassword? `
+      <p class="sub">${loginView==='signup'? 'Create your volunteer account' : 'Sign in to continue'}</p>
+
+      ${loginView==='forgot'? `
       <form id="resetForm">
         <div class="field"><label>Your account email</label><input type="email" id="resetEmail" required></div>
         <div class="error-msg">${escapeHtml(loginError)}</div>
         <div class="success-msg">${escapeHtml(resetMessage)}</div>
         <button type="submit" class="btn">Send Reset Link</button>
         <button type="button" class="btn btn-secondary" id="backToLoginBtn" style="margin-top:8px;">&larr; Back to Login</button>
+      </form>
+      ` : loginView==='signup'? `
+      <form id="signupForm">
+        <div class="field"><label>Full Name *</label><input type="text" id="signupName" required></div>
+        <div class="field"><label>Email *</label><input type="email" id="signupEmail" autocomplete="username" required></div>
+        <div class="field"><label>Phone</label><input type="text" id="signupPhone"></div>
+        <div class="field"><label>Password *</label><input type="password" id="signupPassword" autocomplete="new-password" required><div class="hint">Minimum 6 characters</div></div>
+        <div class="error-msg">${escapeHtml(signupError)}</div>
+        <button type="submit" class="btn">Create My Account</button>
+        <button type="button" class="btn btn-secondary" id="backToLoginBtn2" style="margin-top:8px;">&larr; Back to Login</button>
       </form>
       ` : `
       <form id="loginForm">
@@ -445,6 +505,7 @@ function renderLogin(){
         <div class="error-msg">${escapeHtml(loginError)}</div>
         <button type="submit" class="btn">Log In</button>
         <button type="button" class="back-link" id="forgotPasswordBtn" style="display:block; margin:10px auto 0;">Forgot password?</button>
+        <button type="button" class="btn btn-secondary" id="goSignupBtn" style="margin-top:14px;">New volunteer? Sign Up</button>
       </form>
       `}
     </div>
@@ -458,7 +519,10 @@ function bindLoginEvents(){
       doLogin(document.getElementById('loginEmail').value, document.getElementById('loginPassword').value);
     });
     document.getElementById('forgotPasswordBtn').addEventListener('click', function(){
-      showForgotPassword=true; loginError=''; resetMessage=''; render();
+      loginView='forgot'; loginError=''; resetMessage=''; render();
+    });
+    document.getElementById('goSignupBtn').addEventListener('click', function(){
+      loginView='signup'; loginError=''; signupError=''; render();
     });
   }
   const resetForm = document.getElementById('resetForm');
@@ -476,7 +540,24 @@ function bindLoginEvents(){
       });
     });
     document.getElementById('backToLoginBtn').addEventListener('click', function(){
-      showForgotPassword=false; loginError=''; resetMessage=''; render();
+      loginView='login'; loginError=''; resetMessage=''; render();
+    });
+  }
+  const signupForm = document.getElementById('signupForm');
+  if(signupForm){
+    signupForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      const btn = signupForm.querySelector('button[type=submit]');
+      btn.disabled=true; btn.textContent='Creating account...';
+      doSignup(
+        document.getElementById('signupName').value,
+        document.getElementById('signupEmail').value,
+        document.getElementById('signupPassword').value,
+        document.getElementById('signupPhone').value
+      );
+    });
+    document.getElementById('backToLoginBtn2').addEventListener('click', function(){
+      loginView='login'; signupError=''; render();
     });
   }
 }
@@ -673,6 +754,7 @@ function renderProfilePage(v, isAdminViewing){
     <div class="form-actions"><button type="submit" class="btn">💾 Save Changes</button></div>
   </form>
   ${isAdminViewing? `<button class="btn btn-danger" style="margin-top:10px;" data-action="delete-volunteer" data-id="${v.id}">🗑️ Delete Volunteer</button>`:''}
+  ${isAdminViewing && user && user.role==='volunteer'? `<button class="btn btn-secondary" style="margin-top:10px;" data-action="grant-admin" data-uid="${user.uid}">⬆️ Grant Admin Access</button>`:''}
   <div class="section-title">Attendance History<span style="font-size:12px; font-weight:600; color:var(--muted);">${totalHoursFor(v.id)} hrs &middot; ${totalContributionFor(v.id)} contributed</span></div>
   ${attendance.length? `<div class="card"><table><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Hrs</th><th>Paid</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : emptyState('✅','No attendance records yet.')}
   `;
@@ -681,11 +763,19 @@ function renderProfilePage(v, isAdminViewing){
 /* ============================= EVENTS ============================= */
 function renderEvents(){
   const isAdmin = currentUser.role==='admin';
-  const events = getEvents().slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
+  let events = getEvents().slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+  if(eventSearch.trim()){
+    const q = eventSearch.trim().toLowerCase();
+    events = events.filter(function(e){ return (e.name||'').toLowerCase().includes(q) || (e.location||'').toLowerCase().includes(q); });
+  }
   return `
-  ${isAdmin? `<div class="toolbar"><div style="flex:1;"></div><button class="btn" id="toggleAddEvent" style="width:auto;">${showAddEventForm?'✕ Close':'➕ Add Event'}</button></div>${showAddEventForm? addEventForm() : ''}` : ''}
+  <div class="toolbar">
+    <input type="text" id="eventSearchInput" placeholder="Search events..." value="${escapeHtml(eventSearch)}">
+    ${isAdmin? `<button class="btn" id="toggleAddEvent" style="width:auto;">${showAddEventForm?'✕ Close':'➕ Add'}</button>` : ''}
+  </div>
+  ${isAdmin && showAddEventForm? addEventForm() : ''}
   <div class="section-title">All Events (${events.length})</div>
-  ${events.length? events.map(function(e){ return eventCard(e, isAdmin); }).join('') : emptyState('📅','No events yet.')}
+  ${events.length? events.map(function(e){ return eventCard(e, isAdmin); }).join('') : emptyState('📅','No events found.')}
   `;
 }
 function addEventForm(){
@@ -707,18 +797,28 @@ function addEventForm(){
     <div class="form-actions"><button type="submit" class="btn">Save Event</button></div>
   </form>`;
 }
-function eventCard(e, showDelete){
+function eventCard(e, isAdmin){
   const isPast = !e.recurring && e.date < todayStr();
   const isRecurring = e.recurring==='weekly';
+  const goingCount = getRsvps().filter(function(r){ return r.eventId===e.id && r.response==='yes'; }).length;
+  const myRsvp = !isAdmin && currentUser.volunteerId
+    ? getRsvps().find(function(r){ return r.eventId===e.id && r.volunteerId===currentUser.volunteerId && r.response==='yes'; })
+    : null;
   return `
   <div class="card">
-    <div class="row1"><h3>${escapeHtml(e.name)}</h3>${showDelete? `<button class="icon-btn danger" data-action="delete-event" data-id="${e.id}">🗑️</button>`:''}</div>
+    <div class="row1"><h3>${escapeHtml(e.name)}</h3>${isAdmin? `<button class="icon-btn danger" data-action="delete-event" data-id="${e.id}">🗑️</button>`:''}</div>
     ${isRecurring
       ? `<div class="meta">🔁 Every ${DAY_NAMES[Number(e.dayOfWeek)]} ${e.time? '· ⏰ '+escapeHtml(e.time):''}</div>`
       : `<div class="meta">📅 ${escapeHtml(e.date)} ${e.time? '· ⏰ '+escapeHtml(e.time):''}</div>`}
     ${e.location? `<div class="meta">📍 ${escapeHtml(e.location)}</div>`:''}
     ${e.description? `<div class="meta">${escapeHtml(e.description)}</div>`:''}
     <span class="badge ${isRecurring?'badge-indigo':(isPast?'badge-gray':'badge-green')}">${isRecurring?'Weekly':(isPast?'Past':'Upcoming')}</span>
+    ${isAdmin? `<span class="badge badge-gray">${goingCount} going</span>` : ''}
+    ${!isAdmin && !isPast ? (
+      myRsvp
+        ? `<div style="margin-top:8px;"><span class="badge badge-green">✅ You're going</span> <button class="icon-btn" data-action="rsvp-cancel" data-eid="${e.id}" style="font-size:12px;">Cancel</button></div>`
+        : `<button class="btn btn-sm" data-action="rsvp-yes" data-eid="${e.id}" style="margin-top:8px;">🙋 I'm Going</button>`
+    ) : ''}
   </div>`;
 }
 
@@ -813,6 +913,20 @@ function renderSettings(){
   </div>
   <div class="section-title">Your Account</div>
   <div class="empty-state" style="padding:10px 4px; text-align:left;">Signed in as <b>${escapeHtml(currentUser.email)}</b>.<br>Add or remove volunteer logins from the Volunteers tab.</div>
+
+  <div class="section-title">Admin Accounts<button class="btn btn-sm btn-secondary" id="toggleAddAdmin">${showAddAdminForm?'✕ Close':'➕ Add Admin'}</button></div>
+  ${showAddAdminForm? `
+  <form class="add-form" id="addAdminForm">
+    <h4>Add Another Admin</h4>
+    <div class="field"><label>Name *</label><input type="text" id="admin_name" required></div>
+    <div class="field"><label>Email *</label><input type="email" id="admin_email" required></div>
+    <div class="field"><label>Password *</label><input type="text" id="admin_password" required><div class="hint">Minimum 6 characters &mdash; share this with them</div></div>
+    <div class="error-msg" id="admin_error"></div>
+    <div class="form-actions"><button type="submit" class="btn">Create Admin</button></div>
+  </form>` : ''}
+  ${getUsers().filter(function(u){ return u.role==='admin'; }).map(function(u){
+    return `<div class="card"><div class="row1"><h3 style="font-size:14px;">${escapeHtml(u.name||u.email)}</h3>${u.uid===currentUser.uid? `<span class="badge badge-indigo">You</span>`:''}</div><div class="meta">${escapeHtml(u.email)}</div></div>`;
+  }).join('')}
   `;
 }
 
@@ -823,6 +937,35 @@ function bindPageEvents(){
 
   const searchInput = document.getElementById('volunteerSearchInput');
   if(searchInput) searchInput.addEventListener('input', function(){ volunteerSearch = searchInput.value; renderPage(); });
+
+  const eventSearchInput = document.getElementById('eventSearchInput');
+  if(eventSearchInput) eventSearchInput.addEventListener('input', function(){ eventSearch = eventSearchInput.value; renderPage(); });
+
+  const toggleAddAdmin = document.getElementById('toggleAddAdmin');
+  if(toggleAddAdmin) toggleAddAdmin.addEventListener('click', function(){ showAddAdminForm=!showAddAdminForm; renderPage(); });
+
+  const addAdminForm = document.getElementById('addAdminForm');
+  if(addAdminForm){
+    addAdminForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      const name = document.getElementById('admin_name').value.trim();
+      const email = document.getElementById('admin_email').value.trim();
+      const password = document.getElementById('admin_password').value;
+      const errEl = document.getElementById('admin_error');
+      errEl.textContent='';
+      if(!name || !email){ errEl.textContent='Name and email are required.'; return; }
+      if(password.length < 6){ errEl.textContent='Password must be at least 6 characters.'; return; }
+      const btn = addAdminForm.querySelector('button[type=submit]');
+      btn.disabled=true; btn.textContent='Creating...';
+      createAdminLogin(name, email, password).then(function(){
+        showAddAdminForm=false;
+        renderPage();
+      }).catch(function(err){
+        errEl.textContent = friendlyAuthError(err);
+        btn.disabled=false; btn.textContent='Create Admin';
+      });
+    });
+  }
 
   const toggleAddVol = document.getElementById('toggleAddVolunteer');
   if(toggleAddVol) toggleAddVol.addEventListener('click', function(){ showAddVolunteerForm=!showAddVolunteerForm; renderPage(); });
@@ -1073,6 +1216,21 @@ function bindPageEvents(){
       if(preset) db.collection('settings').doc('app').set({theme:preset}, {merge:true});
     }
     else if(action==='remove-logo'){ db.collection('settings').doc('app').set({logoData:null}, {merge:true}); }
+    else if(action==='rsvp-yes'){
+      const eid = btn.dataset.eid;
+      const existing = getRsvps().find(function(r){ return r.eventId===eid && r.volunteerId===currentUser.volunteerId; });
+      if(existing){ db.collection('rsvps').doc(existing.id).update({response:'yes', time:new Date().toISOString()}); }
+      else { db.collection('rsvps').add({eventId:eid, volunteerId:currentUser.volunteerId, response:'yes', time:new Date().toISOString()}); }
+    }
+    else if(action==='rsvp-cancel'){
+      const eid = btn.dataset.eid;
+      const existing = getRsvps().find(function(r){ return r.eventId===eid && r.volunteerId===currentUser.volunteerId; });
+      if(existing) db.collection('rsvps').doc(existing.id).delete();
+    }
+    else if(action==='grant-admin'){
+      if(!confirm('Give this person full admin access? They will be able to manage all volunteers, events, and settings.')) return;
+      promoteToAdmin(btn.dataset.uid).then(function(){ renderPage(); });
+    }
   });
 }
 
