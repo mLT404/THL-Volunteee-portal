@@ -176,7 +176,7 @@ function totalHoursFor(volunteerId){
     .reduce(function(sum,a){ return sum + (Number(a.hours)||0); }, 0);
 }
 function totalContributionFor(volunteerId){
-  return getAttendance().filter(function(a){ return a.volunteerId===volunteerId && a.status==='present'; })
+  return getAttendance().filter(function(a){ return a.volunteerId===volunteerId; })
     .reduce(function(sum,a){ return sum + (Number(a.contribution)||0); }, 0);
 }
 const DAY_NAMES=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -200,7 +200,8 @@ function weeklyStats(limit){
     const d = a.sessionDate || (ev? ev.date : null);
     if(!d) return;
     if(!map[d]) map[d] = {present:0, contribution:0};
-    if(a.status==='present'){ map[d].present += 1; map[d].contribution += (Number(a.contribution)||0); }
+    if(a.status==='present'){ map[d].present += 1; }
+    map[d].contribution += (Number(a.contribution)||0);
   });
   const dates = Object.keys(map).sort();
   const recent = dates.slice(-(limit||8));
@@ -775,7 +776,7 @@ function renderDashboard(){
   if(isAdmin){
     const presentToday = attendance.filter(function(a){ return a.time && a.time.slice(0,10)===todayStr() && a.status==='present'; }).length;
     const totalHoursAll = attendance.filter(function(a){ return a.status==='present'; }).reduce(function(s,a){ return s+(Number(a.hours)||0); },0);
-    const totalContribAll = attendance.filter(function(a){ return a.status==='present'; }).reduce(function(s,a){ return s+(Number(a.contribution)||0); },0);
+    const totalContribAll = attendance.reduce(function(s,a){ return s+(Number(a.contribution)||0); },0);
     return `
     <div class="welcome-card"><h2>Welcome back 👋</h2><p>Here's what's happening with your volunteer program.</p></div>
     ${announceHtml}
@@ -899,7 +900,7 @@ function renderProfilePage(v, isAdminViewing){
   const historyRows = attendance.map(function(a){
     const ev = events.find(function(e){ return e.id===a.eventId; });
     const displayDate = a.sessionDate || (ev?ev.date:'-');
-    return `<tr><td>${escapeHtml(ev?ev.name:'Deleted event')}</td><td>${escapeHtml(displayDate)}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.status==='present'?(Number(a.hours)||0):'-'}</td><td>${a.status==='present'?(Number(a.contribution)||0):'-'}</td></tr>`;
+    return `<tr><td>${escapeHtml(ev?ev.name:'Deleted event')}</td><td>${escapeHtml(displayDate)}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.status==='present'?(Number(a.hours)||0):'-'}</td><td>${Number(a.contribution)||0}</td></tr>`;
   }).join('');
 
   return `
@@ -1041,6 +1042,8 @@ function renderAttendance(){
           </div>
           ${status==='present'? `
           <div class="hours-row">Hours: <input type="number" min="0" step="0.5" class="hours-input" data-action="set-hours" data-vid="${v.id}" value="${hrs}"></div>
+          ` : ''}
+          ${status? `
           <div class="hours-row">Contribution: <input type="number" min="0" step="0.01" class="hours-input" data-action="set-contribution" data-vid="${v.id}" value="${contrib}"></div>
           ` : ''}
         </div>
@@ -1062,7 +1065,7 @@ function renderAttendance(){
     const historyRows = attendance.slice().sort(function(a,b){ return (b.time||'').localeCompare(a.time||''); }).map(function(a){
       const ev = getEvents().find(function(e){ return e.id===a.eventId; });
       const displayDate = a.sessionDate || (ev?ev.date:'-');
-      return `<tr><td>${escapeHtml(ev? ev.name : 'Deleted event')}</td><td>${escapeHtml(displayDate)}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.status==='present'?(Number(a.hours)||0):'-'}</td><td>${a.status==='present'?(Number(a.contribution)||0):'-'}</td></tr>`;
+      return `<tr><td>${escapeHtml(ev? ev.name : 'Deleted event')}</td><td>${escapeHtml(displayDate)}</td><td><span class="badge ${a.status==='present'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.status==='present'?(Number(a.hours)||0):'-'}</td><td>${Number(a.contribution)||0}</td></tr>`;
     }).join('');
     return `
     <div class="section-title">Check In Today</div>
@@ -1374,7 +1377,7 @@ function bindPageEvents(){
       const rows = [['Volunteer','Status','Hours','Contribution','Event','Session Date']];
       getAttendance().filter(function(a){ return a.eventId===selectedEventId; }).forEach(function(a){
         const v = getVolunteers().find(function(vv){ return vv.id===a.volunteerId; });
-        rows.push([v?v.name:'Unknown', a.status, a.status==='present'?(a.hours||0):'', a.status==='present'?(a.contribution||0):'', ev?ev.name:'', a.sessionDate||(ev?ev.date:'')]);
+        rows.push([v?v.name:'Unknown', a.status, a.status==='present'?(a.hours||0):'', a.contribution||0, ev?ev.name:'', a.sessionDate||(ev?ev.date:'')]);
       });
       downloadCSV('attendance-'+(ev?(ev.recurring==='weekly'?attendanceSessionDate:ev.date):'export')+'.csv', rows);
     });
@@ -1382,13 +1385,17 @@ function bindPageEvents(){
   document.querySelectorAll('[data-action="set-hours"]').forEach(function(inp){
     inp.addEventListener('change', function(){
       const hrs = parseFloat(inp.value)||0;
-      upsertAttendance(selectedEventId, inp.dataset.vid, 'present', attendanceSessionDate, hrs);
+      const rec = getAttendance().find(function(a){ return a.eventId===selectedEventId && a.volunteerId===inp.dataset.vid && (a.sessionDate||attendanceSessionDate)===attendanceSessionDate; });
+      const status = rec? rec.status : 'present';
+      upsertAttendance(selectedEventId, inp.dataset.vid, status, attendanceSessionDate, hrs);
     });
   });
   document.querySelectorAll('[data-action="set-contribution"]').forEach(function(inp){
     inp.addEventListener('change', function(){
       const amt = parseFloat(inp.value)||0;
-      upsertAttendance(selectedEventId, inp.dataset.vid, 'present', attendanceSessionDate, null, amt);
+      const rec = getAttendance().find(function(a){ return a.eventId===selectedEventId && a.volunteerId===inp.dataset.vid && (a.sessionDate||attendanceSessionDate)===attendanceSessionDate; });
+      const status = rec? rec.status : 'absent';
+      upsertAttendance(selectedEventId, inp.dataset.vid, status, attendanceSessionDate, null, amt);
     });
   });
   const sessionDateInput = document.getElementById('sessionDateInput');
@@ -1470,10 +1477,18 @@ function bindPageEvents(){
   });
 }
 
+function attendanceDocId(eventId, volunteerId, sessionDate){
+  return (eventId+'_'+volunteerId+'_'+sessionDate).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
 function upsertAttendance(eventId, volunteerId, status, sessionDate, hours, contribution){
   const ev = getEvents().find(function(e){ return e.id===eventId; });
   const sd = sessionDate || (ev? currentSessionDate(ev) : todayStr());
-  const existing = getAttendance().find(function(a){ return a.eventId===eventId && a.volunteerId===volunteerId && (a.sessionDate||(ev?ev.date:sd))===sd; });
+  const docId = attendanceDocId(eventId, volunteerId, sd);
+  // Clean up any older duplicate records for this same person+session (from before this fix)
+  const dupes = getAttendance().filter(function(a){
+    return a.eventId===eventId && a.volunteerId===volunteerId && (a.sessionDate||sd)===sd && a.id!==docId;
+  });
+  const existing = getAttendance().find(function(a){ return a.id===docId; }) || dupes[0];
   const data = {eventId:eventId, volunteerId:volunteerId, status:status, sessionDate:sd, time:new Date().toISOString()};
   if(hours!=null) data.hours = hours;
   else if(existing && existing.hours!=null) data.hours = existing.hours;
@@ -1481,8 +1496,9 @@ function upsertAttendance(eventId, volunteerId, status, sessionDate, hours, cont
   if(contribution!=null) data.contribution = contribution;
   else if(existing && existing.contribution!=null) data.contribution = existing.contribution;
   else if(status==='present') data.contribution = 0;
-  if(existing){ db.collection('attendance').doc(existing.id).update(data); }
-  else { db.collection('attendance').add(data); }
+  db.collection('attendance').doc(docId).set(data, {merge:true}).then(function(){
+    dupes.forEach(function(d){ db.collection('attendance').doc(d.id).delete(); });
+  });
 }
 
 /* ============================= START ============================= */
