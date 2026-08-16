@@ -115,6 +115,14 @@
   .top-vol-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);}
   .top-vol-row:last-child{border-bottom:none;}
   .top-vol-rank{width:22px; height:22px; border-radius:50%; background:#eef0ff; color:var(--primary); font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+  .log-list{display:flex; flex-direction:column; gap:0;}
+  .log-row{display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border);}
+  .log-row:last-child{border-bottom:none;}
+  .log-dot{width:10px; height:10px; border-radius:50%; flex-shrink:0;}
+  .log-dot.present{background:var(--success);}
+  .log-dot.absent{background:var(--danger);}
+  .log-date{flex:1; font-size:13px; font-weight:600;}
+  .log-sub{font-size:11px; color:var(--muted); margin-top:1px;}
 </style>
 </head>
 <body>
@@ -229,16 +237,27 @@ function renderBarChart(items, valueKey, formatFn){
     </div>`;
   }).join('')}</div>`;
 }
+function formatDateNice(dateStr){
+  if(!dateStr) return '-';
+  const parts = dateStr.split('-');
+  if(parts.length!==3) return dateStr;
+  const d = new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]));
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return DAY_NAMES[d.getDay()]+', '+months[d.getMonth()]+' '+d.getDate()+', '+d.getFullYear();
+}
 function recurringAttendanceBreakdown(volunteerId){
   const byEvent = {};
   getAttendance().forEach(function(a){
-    if(a.volunteerId!==volunteerId || a.status!=='present') return;
+    if(a.volunteerId!==volunteerId) return;
     const ev = getEvents().find(function(e){ return e.id===a.eventId; });
     if(!ev || ev.recurring!=='weekly') return;
-    if(!byEvent[ev.id]) byEvent[ev.id] = {event:ev, count:0};
-    byEvent[ev.id].count += 1;
+    if(!byEvent[ev.id]) byEvent[ev.id] = {event:ev, dates:[]};
+    byEvent[ev.id].dates.push({date: a.sessionDate || ev.date, status: a.status, contribution: Number(a.contribution)||0});
   });
-  return Object.keys(byEvent).map(function(k){ return byEvent[k]; });
+  return Object.keys(byEvent).map(function(k){
+    byEvent[k].dates.sort(function(a,b){ return b.date.localeCompare(a.date); });
+    return byEvent[k];
+  });
 }
 function attendeeCountForEvent(e){
   if(e.recurring==='weekly'){
@@ -927,11 +946,22 @@ function renderProfilePage(v, isAdminViewing){
   ${(function(){
     const breakdown = recurringAttendanceBreakdown(v.id);
     if(!breakdown.length) return '';
-    return `<div class="section-title">Recurring Meetings Attended</div><div class="card">${breakdown.map(function(b){
-      return `<div class="top-vol-row"><div style="flex:1;">🔁 ${escapeHtml(b.event.name)} <span style="color:var(--muted); font-size:11px;">(every ${DAY_NAMES[Number(b.event.dayOfWeek)]})</span></div><span class="badge badge-indigo">${b.count} ${DAY_NAMES[Number(b.event.dayOfWeek)]}s attended</span></div>`;
-    }).join('')}</div>`;
+    return breakdown.map(function(b){
+      const presentCount = b.dates.filter(function(d){ return d.status==='present'; }).length;
+      return `
+      <div class="section-title">🔁 ${escapeHtml(b.event.name)}<span style="font-size:12px; font-weight:600; color:var(--muted);">${presentCount} ${DAY_NAMES[Number(b.event.dayOfWeek)]}s attended</span></div>
+      <div class="card log-list">${b.dates.map(function(d){
+        return `<div class="log-row">
+          <div class="log-dot ${d.status}"></div>
+          <div style="flex:1;">
+            <div class="log-date">${escapeHtml(formatDateNice(d.date))}</div>
+            <div class="log-sub">${d.status==='present'? '✅ Attended' : '❌ Absent'}${d.contribution>0? ' &middot; '+d.contribution+' contributed' : ''}</div>
+          </div>
+        </div>`;
+      }).join('')}</div>`;
+    }).join('');
   })()}
-  <div class="section-title">Attendance History<span style="font-size:12px; font-weight:600; color:var(--muted);">${totalHoursFor(v.id)} hrs &middot; ${totalContributionFor(v.id)} contributed</span></div>
+  <div class="section-title">Full Attendance History<span style="font-size:12px; font-weight:600; color:var(--muted);">${totalHoursFor(v.id)} hrs &middot; ${totalContributionFor(v.id)} contributed</span></div>
   ${attendance.length? `<div class="card"><table><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Hrs</th><th>Paid</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : emptyState('✅','No attendance records yet.')}
   `;
 }
@@ -1069,6 +1099,18 @@ function renderAttendance(){
       <select id="eventSelect">${events.map(function(e){ return `<option value="${e.id}" ${e.id===selectedEventId?'selected':''}>${escapeHtml(e.name)} ${e.recurring==='weekly'?'(Weekly - '+DAY_NAMES[Number(e.dayOfWeek)]+')':'('+escapeHtml(e.date)+')'}</option>`; }).join('')}</select>
     </div>
     ${isRecurring? `<div class="field"><label>Session Date (this week's meeting)</label><input type="date" id="sessionDateInput" value="${sessionDate}" max="${todayStr()}"></div>` : ''}
+    ${isRecurring? (function(){
+      const pastDates = Array.from(new Set(attendance.filter(function(a){ return a.eventId===selectedEventId; }).map(function(a){ return a.sessionDate; }).filter(Boolean))).sort().reverse().slice(0,8);
+      if(!pastDates.length) return '';
+      return `<div class="section-title">Recent Sessions</div><div class="card log-list">${pastDates.map(function(d){
+        const count = attendance.filter(function(a){ return a.eventId===selectedEventId && a.sessionDate===d && a.status==='present'; }).length;
+        return `<div class="log-row clickable" data-action="jump-session" data-date="${d}" style="cursor:pointer;">
+          <div class="log-dot ${d===sessionDate?'present':'absent'}" style="background:${d===sessionDate?'var(--primary)':'var(--border)'};"></div>
+          <div style="flex:1;"><div class="log-date">${escapeHtml(formatDateNice(d))}</div><div class="log-sub">${count} attended</div></div>
+          ${d===sessionDate? `<span class="badge badge-indigo">Viewing</span>` : ''}
+        </div>`;
+      }).join('')}</div>`;
+    })() : ''}
     ${volunteers.length? rows : emptyState('👥','Add volunteers first to take attendance.')}
     ` : emptyState('📅','Add an event first to take attendance.')}
     `;
@@ -1430,6 +1472,7 @@ function bindPageEvents(){
     else if(action==='goto-analytics'){ currentPage='analytics'; renderPage(); }
     else if(action==='goto-qa'){ currentPage='qa'; render(); }
     else if(action==='back-to-dashboard'){ currentPage='dashboard'; renderPage(); }
+    else if(action==='jump-session'){ attendanceSessionDate = btn.dataset.date; renderPage(); }
     else if(action==='answer-question'){
       const qid = btn.dataset.qid;
       const ta = el.querySelector('[data-action="answer-input"][data-qid="'+qid+'"]');
