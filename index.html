@@ -228,6 +228,24 @@ function renderBarChart(items, valueKey, formatFn){
     </div>`;
   }).join('')}</div>`;
 }
+function recurringAttendanceBreakdown(volunteerId){
+  const byEvent = {};
+  getAttendance().forEach(function(a){
+    if(a.volunteerId!==volunteerId || a.status!=='present') return;
+    const ev = getEvents().find(function(e){ return e.id===a.eventId; });
+    if(!ev || ev.recurring!=='weekly') return;
+    if(!byEvent[ev.id]) byEvent[ev.id] = {event:ev, count:0};
+    byEvent[ev.id].count += 1;
+  });
+  return Object.keys(byEvent).map(function(k){ return byEvent[k]; });
+}
+function attendeeCountForEvent(e){
+  if(e.recurring==='weekly'){
+    const sd = currentSessionDate(e);
+    return getAttendance().filter(function(a){ return a.eventId===e.id && a.status==='present' && (a.sessionDate||sd)===sd; }).length;
+  }
+  return getAttendance().filter(function(a){ return a.eventId===e.id && a.status==='present'; }).length;
+}
 function renderAnalytics(){
   const weekly = weeklyStats(8);
   const top = topVolunteers(5);
@@ -248,6 +266,60 @@ function renderAnalytics(){
     }).join('') : emptyState('🏆','No attendance data yet.')}
   </div>
   `;
+}
+
+/* ============================= Q&A ============================= */
+function renderQA(){
+  const isAdmin = currentUser.role==='admin';
+  const s = getSettings();
+  const contactLine = s.contactEmail
+    ? `<div class="empty-state" style="padding:10px 4px; text-align:left;">Prefer email? Reach us directly at <a href="mailto:${escapeHtml(s.contactEmail)}">${escapeHtml(s.contactEmail)}</a></div>`
+    : '';
+
+  if(isAdmin){
+    const questions = getQuestions().slice().sort(function(a,b){
+      const aPending = a.status!=='answered' ? 0 : 1;
+      const bPending = b.status!=='answered' ? 0 : 1;
+      if(aPending!==bPending) return aPending-bPending;
+      return (b.time||'').localeCompare(a.time||'');
+    });
+    return `
+    <button class="back-link" data-action="back-to-dashboard">&larr; Back to Dashboard</button>
+    <div class="section-title">Questions & Answers (${questions.length})</div>
+    ${questions.length? questions.map(function(q){
+      return `<div class="card">
+        <div class="meta" style="font-weight:700; color:var(--text); font-size:13px;">${escapeHtml(q.askedByName||'Volunteer')}</div>
+        <div class="meta">${escapeHtml(q.question)}</div>
+        ${q.status==='answered'? `
+          <div class="announce-card" style="margin-top:8px;"><span class="ic">💬</span><div class="txt">${escapeHtml(q.answer)}</div></div>
+        ` : `
+          <div class="field" style="margin-top:8px;"><textarea rows="2" placeholder="Type your reply..." data-action="answer-input" data-qid="${q.id}"></textarea></div>
+          <button class="btn btn-sm" data-action="answer-question" data-qid="${q.id}">Send Reply</button>
+        `}
+      </div>`;
+    }).join('') : emptyState('❓','No questions yet.')}
+    `;
+  } else {
+    const myQuestions = getQuestions().slice().sort(function(a,b){ return (b.time||'').localeCompare(a.time||''); });
+    return `
+    <div class="section-title">Ask a Question</div>
+    <form class="add-form" id="askForm">
+      <div class="field"><textarea id="questionInput" rows="3" placeholder="Type your question for the admin..." required></textarea></div>
+      <div class="error-msg" id="ask_error"></div>
+      <div class="form-actions"><button type="submit" class="btn">Send Question</button></div>
+    </form>
+    ${contactLine}
+    <div class="section-title">Your Questions</div>
+    ${myQuestions.length? myQuestions.map(function(q){
+      return `<div class="card">
+        <div class="meta">${escapeHtml(q.question)}</div>
+        ${q.status==='answered'
+          ? `<div class="announce-card" style="margin-top:8px;"><span class="ic">💬</span><div class="txt">${escapeHtml(q.answer)}</div></div>`
+          : `<span class="badge badge-gray" style="margin-top:6px;">Waiting for answer</span>`}
+      </div>`;
+    }).join('') : emptyState('❓','No questions asked yet.')}
+    `;
+  }
 }
 function downloadCSV(filename, rows){
   const csv = rows.map(function(row){
@@ -282,8 +354,8 @@ function resizeImageFile(file, maxDim, quality, callback){
 }
 
 /* ============================= CACHES (live from Firestore) ============================= */
-let volunteersCache=[], eventsCache=[], attendanceCache=[], usersCache=[], rsvpsCache=[];
-let settingsCache={ adminCreated:false, logoData:null, portalName:'Volunteer Portal', theme:THEME_PRESETS[0], announcement:'' };
+let volunteersCache=[], eventsCache=[], attendanceCache=[], usersCache=[], rsvpsCache=[], questionsCache=[];
+let settingsCache={ adminCreated:false, logoData:null, portalName:'Volunteer Portal', theme:THEME_PRESETS[0], announcement:'', contactEmail:'' };
 let settingsLoaded=false;
 function getVolunteers(){ return volunteersCache; }
 function getEvents(){ return eventsCache; }
@@ -291,6 +363,7 @@ function getAttendance(){ return attendanceCache; }
 function getUsers(){ return usersCache; }
 function getSettings(){ return settingsCache; }
 function getRsvps(){ return rsvpsCache; }
+function getQuestions(){ return questionsCache; }
 
 /* ============================= APP STATE ============================= */
 let currentUser=null;
@@ -311,7 +384,7 @@ let selfSignupInProgress=false;
 let showAddAdminForm=false;
 
 /* ============================= FIRESTORE LISTENERS ============================= */
-let unsubSettings=null, unsubVolunteers=null, unsubEvents=null, unsubAttendance=null, unsubUsers=null, unsubRsvps=null;
+let unsubSettings=null, unsubVolunteers=null, unsubEvents=null, unsubAttendance=null, unsubUsers=null, unsubRsvps=null, unsubQuestions=null;
 
 function startPublicListeners(){
   unsubSettings = db.collection('settings').doc('app').onSnapshot(function(doc){
@@ -336,6 +409,10 @@ function startPrivateListeners(){
       attendanceCache = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
       renderPage();
     });
+    unsubQuestions = db.collection('questions').onSnapshot(function(snap){
+      questionsCache = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+      renderPage();
+    });
   } else {
     if(currentUser.volunteerId){
       unsubVolunteers = db.collection('volunteers').doc(currentUser.volunteerId).onSnapshot(function(doc){
@@ -344,6 +421,10 @@ function startPrivateListeners(){
       });
       unsubAttendance = db.collection('attendance').where('volunteerId','==',currentUser.volunteerId).onSnapshot(function(snap){
         attendanceCache = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+        renderPage();
+      });
+      unsubQuestions = db.collection('questions').where('volunteerId','==',currentUser.volunteerId).onSnapshot(function(snap){
+        questionsCache = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
         renderPage();
       });
     }
@@ -358,9 +439,9 @@ function startPrivateListeners(){
   });
 }
 function stopPrivateListeners(){
-  [unsubVolunteers,unsubEvents,unsubAttendance,unsubUsers,unsubRsvps].forEach(function(u){ if(u) u(); });
-  unsubVolunteers=unsubEvents=unsubAttendance=unsubUsers=unsubRsvps=null;
-  volunteersCache=[]; eventsCache=[]; attendanceCache=[]; usersCache=[]; rsvpsCache=[];
+  [unsubVolunteers,unsubEvents,unsubAttendance,unsubUsers,unsubRsvps,unsubQuestions].forEach(function(u){ if(u) u(); });
+  unsubVolunteers=unsubEvents=unsubAttendance=unsubUsers=unsubRsvps=unsubQuestions=null;
+  volunteersCache=[]; eventsCache=[]; attendanceCache=[]; usersCache=[]; rsvpsCache=[]; questionsCache=[];
 }
 
 function applyTheme(){
@@ -676,6 +757,7 @@ function renderPage(){
   else if(currentPage==='attendance') el.innerHTML = renderAttendance();
   else if(currentPage==='settings') el.innerHTML = renderSettings();
   else if(currentPage==='analytics') el.innerHTML = renderAnalytics();
+  else if(currentPage==='qa') el.innerHTML = renderQA();
   bindPageEvents();
 }
 
@@ -705,9 +787,13 @@ function renderDashboard(){
       <div class="stat-card"><div class="num">${totalHoursAll}</div><div class="label">Total Hours Logged</div></div>
       <div class="stat-card"><div class="num">${totalContribAll}</div><div class="label">Total Contributions</div></div>
     </div>
-    <div class="card clickable" data-action="goto-analytics" style="margin-bottom:16px;">
+    <div class="card clickable" data-action="goto-analytics" style="margin-bottom:10px;">
       <div class="row1"><h3>📊 View Full Analytics</h3><span class="icon-btn">&rarr;</span></div>
       <div class="meta">Attendance trends, contributions, and your most active volunteers.</div>
+    </div>
+    <div class="card clickable" data-action="goto-qa" style="margin-bottom:16px;">
+      <div class="row1"><h3>❓ Questions & Answers</h3><span class="icon-btn">&rarr;</span></div>
+      <div class="meta">${getQuestions().filter(function(q){ return q.status!=='answered'; }).length} question(s) waiting for a reply.</div>
     </div>
     <div class="section-title">Upcoming Events</div>
     ${upcoming.length? upcoming.slice(0,4).map(function(e){ return eventCard(e,true); }).join('') : emptyState('📅','No upcoming events yet.')}
@@ -717,12 +803,18 @@ function renderDashboard(){
     const myAttendance = attendance.filter(function(a){ return a.volunteerId===currentUser.volunteerId; });
     const myHours = totalHoursFor(currentUser.volunteerId);
     const myContrib = totalContributionFor(currentUser.volunteerId);
+    const mySundays = getAttendance().filter(function(a){
+      if(a.volunteerId!==currentUser.volunteerId || a.status!=='present') return false;
+      const ev = events.find(function(e){ return e.id===a.eventId; });
+      return ev && ev.recurring==='weekly' && Number(ev.dayOfWeek)===0;
+    }).length;
     return `
     <div class="welcome-card"><h2>Hi, ${escapeHtml(currentUser.name||currentUser.email)} 👋</h2><p>Thanks for being part of the team.</p></div>
     ${announceHtml}
     <div class="grid-stats">
       <div class="stat-card"><div class="num">${upcoming.length}</div><div class="label">Upcoming Events</div></div>
       <div class="stat-card"><div class="num">${myAttendance.filter(function(a){ return a.status==='present'; }).length}</div><div class="label">Times Attended</div></div>
+      <div class="stat-card"><div class="num">${mySundays}</div><div class="label">Sundays Attended</div></div>
       <div class="stat-card"><div class="num">${myHours}</div><div class="label">Total Hours</div></div>
       <div class="stat-card"><div class="num">${myContrib}</div><div class="label">Total Contributed</div></div>
     </div>
@@ -732,6 +824,10 @@ function renderDashboard(){
         <div class="info"><h3>${escapeHtml(my.name)}</h3><div class="meta">Tap to view / edit your profile</div></div>
       </div>
     </div>`:''}
+    <div class="card clickable" data-action="goto-qa" style="margin-bottom:16px;">
+      <div class="row1"><h3>❓ Questions & Answers</h3><span class="icon-btn">&rarr;</span></div>
+      <div class="meta">Ask the admin something, or check replies to your past questions.</div>
+    </div>
     <div class="section-title">Upcoming Events</div>
     ${upcoming.length? upcoming.slice(0,4).map(function(e){ return eventCard(e,false); }).join('') : emptyState('📅','No upcoming events yet.')}
     `;
@@ -827,6 +923,13 @@ function renderProfilePage(v, isAdminViewing){
   </form>
   ${isAdminViewing? `<button class="btn btn-danger" style="margin-top:10px;" data-action="delete-volunteer" data-id="${v.id}">🗑️ Delete Volunteer</button>`:''}
   ${isAdminViewing && user && user.role==='volunteer'? `<button class="btn btn-secondary" style="margin-top:10px;" data-action="grant-admin" data-uid="${user.uid}">⬆️ Grant Admin Access</button>`:''}
+  ${(function(){
+    const breakdown = recurringAttendanceBreakdown(v.id);
+    if(!breakdown.length) return '';
+    return `<div class="section-title">Recurring Meetings Attended</div><div class="card">${breakdown.map(function(b){
+      return `<div class="top-vol-row"><div style="flex:1;">🔁 ${escapeHtml(b.event.name)} <span style="color:var(--muted); font-size:11px;">(every ${DAY_NAMES[Number(b.event.dayOfWeek)]})</span></div><span class="badge badge-indigo">${b.count} ${DAY_NAMES[Number(b.event.dayOfWeek)]}s attended</span></div>`;
+    }).join('')}</div>`;
+  })()}
   <div class="section-title">Attendance History<span style="font-size:12px; font-weight:600; color:var(--muted);">${totalHoursFor(v.id)} hrs &middot; ${totalContributionFor(v.id)} contributed</span></div>
   ${attendance.length? `<div class="card"><table><thead><tr><th>Event</th><th>Date</th><th>Status</th><th>Hrs</th><th>Paid</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : emptyState('✅','No attendance records yet.')}
   `;
@@ -900,6 +1003,7 @@ function eventCard(e, isAdmin){
     <span class="badge ${isRecurring?'badge-indigo':(isPast?'badge-gray':'badge-green')}">${isRecurring?'Weekly':(isPast?'Past':'Upcoming')}</span>
     <span class="badge badge-gray">🏷️ ${escapeHtml(e.category||'Other')}</span>
     ${isAdmin? `<span class="badge badge-gray">${goingCount} going</span>` : ''}
+    ${isAdmin? `<span class="badge badge-green">✅ ${attendeeCountForEvent(e)} attended${isRecurring?' this week':''}</span>` : ''}
     ${!isAdmin && !isPast ? (
       myRsvp
         ? `<div style="margin-top:8px;"><span class="badge badge-green">✅ You're going</span> <button class="icon-btn" data-action="rsvp-cancel" data-eid="${e.id}" style="font-size:12px;">Cancel</button></div>`
@@ -997,6 +1101,8 @@ function renderSettings(){
     <button class="btn" id="saveAnnouncement">📣 Post Announcement</button>
     ${s.announcement? `<button class="btn btn-secondary" id="clearAnnouncement">Clear</button>`:''}
   </div>
+  <div class="section-title">Contact Email</div>
+  <div class="toolbar"><input type="email" id="contactEmailInput" value="${escapeHtml(s.contactEmail||'')}" placeholder="e.g. team@yourorg.com" style="flex:1;"><button class="btn" id="saveContactEmail" style="width:auto;">Save</button></div>
   <div class="section-title">Your Account</div>
   <div class="empty-state" style="padding:10px 4px; text-align:left;">Signed in as <b>${escapeHtml(currentUser.email)}</b>.<br>Add or remove volunteer logins from the Volunteers tab.</div>
 
@@ -1221,6 +1327,36 @@ function bindPageEvents(){
       db.collection('settings').doc('app').set({announcement:''}, {merge:true});
     });
   }
+  const saveContactEmailBtn = document.getElementById('saveContactEmail');
+  if(saveContactEmailBtn){
+    saveContactEmailBtn.addEventListener('click', function(){
+      const val = document.getElementById('contactEmailInput').value.trim();
+      db.collection('settings').doc('app').set({contactEmail:val}, {merge:true});
+    });
+  }
+  const askForm = document.getElementById('askForm');
+  if(askForm){
+    askForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      const q = document.getElementById('questionInput').value.trim();
+      const errEl = document.getElementById('ask_error');
+      if(!q){ errEl.textContent='Please type a question.'; return; }
+      const btn = askForm.querySelector('button[type=submit]');
+      btn.disabled=true; btn.textContent='Sending...';
+      db.collection('questions').add({
+        volunteerId: currentUser.volunteerId,
+        askedByName: currentUser.name || currentUser.email,
+        question: q,
+        status: 'pending',
+        time: new Date().toISOString()
+      }).then(function(){
+        renderPage();
+      }).catch(function(err){
+        errEl.textContent = err.message;
+        btn.disabled=false; btn.textContent='Send Question';
+      });
+    });
+  }
   const exportVolunteersBtn = document.getElementById('exportVolunteersCsv');
   if(exportVolunteersBtn){
     exportVolunteersBtn.addEventListener('click', function(){
@@ -1271,7 +1407,15 @@ function bindPageEvents(){
     if(action==='view-volunteer'){ selectedVolunteerId = btn.dataset.id; currentPage='volunteer-detail'; renderPage(); }
     else if(action==='goto-profile'){ currentPage='profile'; render(); }
     else if(action==='goto-analytics'){ currentPage='analytics'; renderPage(); }
+    else if(action==='goto-qa'){ currentPage='qa'; render(); }
     else if(action==='back-to-dashboard'){ currentPage='dashboard'; renderPage(); }
+    else if(action==='answer-question'){
+      const qid = btn.dataset.qid;
+      const ta = el.querySelector('[data-action="answer-input"][data-qid="'+qid+'"]');
+      const answer = ta? ta.value.trim() : '';
+      if(!answer) return;
+      db.collection('questions').doc(qid).update({answer:answer, status:'answered', answeredTime:new Date().toISOString()});
+    }
     else if(action==='back-to-volunteers'){ currentPage='volunteers'; renderPage(); }
     else if(action==='delete-volunteer'){
       const id = btn.dataset.id;
